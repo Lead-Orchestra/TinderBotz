@@ -1,7 +1,11 @@
 # Selenium: automation of browser
 from selenium import webdriver
 # from webdriver_manager.chrome import ChromeDriverManager
-import undetected_chromedriver.v2 as uc
+try:
+    import undetected_chromedriver.v2 as uc
+except ImportError:
+    # Newer versions of undetected-chromedriver (3.4.6+) don't have .v2 submodule
+    import undetected_chromedriver as uc
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -66,12 +70,17 @@ class Session:
                 box = self._get_msg_box(lines=lines, title="Tinderbotz")
                 print(box)
             finally:
-                print("Started session: {}".format(self.started))
+                if hasattr(self, 'started'):
+                    print("Started session: {}".format(self.started))
                 y = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
                 print("Ended session: {}".format(y))
             
-            # Close browser properly
-            self.browser.quit()
+            # Close browser properly if it exists
+            if hasattr(self, 'browser') and self.browser:
+                try:
+                    self.browser.quit()
+                except:
+                    pass
 
         # Go further with the initialisation
         # Setting some options of the browser here below
@@ -92,8 +101,9 @@ class Session:
         options.add_argument('--no-first-run --no-service-autorun --password-store=basic')
         options.add_argument("--lang=en-GB")
 
-        if headless:
-            options.headless = True
+        # Fix for undetected-chromedriver 3.4.6 bug: it checks options.headless but ChromeOptions doesn't have it
+        # Set it as an attribute so the library's check passes, then pass headless as a parameter to uc.Chrome()
+        options.headless = headless
 
         if proxy:
             if '@' in proxy:
@@ -110,9 +120,13 @@ class Session:
             else:
                 options.add_argument(f'--proxy-server=http://{proxy}')
 
+        # Set started time before browser initialization (for cleanup function)
+        self.started = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        
         # Getting the chromedriver from cache or download it from internet
         print("Getting ChromeDriver ...")
-        self.browser = uc.Chrome(options=options)  # ChromeDriverManager().install(),
+        # Pass headless as a parameter to uc.Chrome() instead of setting it on options
+        self.browser = uc.Chrome(options=options, headless=headless)  # ChromeDriverManager().install(),
         # self.browser = webdriver.Chrome(options=options)
         # self.browser.set_window_size(1250, 750)
 
@@ -123,7 +137,6 @@ class Session:
         print(Printouts.BANNER.value)
         time.sleep(1)
 
-        self.started = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         print("Started session: {}\n\n".format(self.started))
 
     # Setting a custom location
