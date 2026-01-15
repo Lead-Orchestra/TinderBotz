@@ -34,3 +34,4 @@ Write-Host ""
 Write-Host "To run the scraper:"
 Write-Host "  uv run python Scraper/tinder_profile_scraper.py ..."
 
+

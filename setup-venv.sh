@@ -36,3 +36,4 @@ echo ""
 echo "To run the scraper:"
 echo "  uv run python Scraper/tinder_profile_scraper.py ..."
 
+
