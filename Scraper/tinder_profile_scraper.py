@@ -455,6 +455,18 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
                 print(f"{YELLOW} No profile found or failed to extract profile data")
                 break
 
+            if debug_html_dir:
+                try:
+                    os.makedirs(debug_html_dir, exist_ok=True)
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    safe_name = "".join([c if c.isalnum() or c in ['-', '_'] else '_' for c in (geomatch.get_name() or 'profile')])
+                    path = os.path.join(debug_html_dir, f"{ts}_profile_loaded_{i+1}_{safe_name}.html")
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(session.browser.page_source or "")
+                    print(f"{CYAN} HTML snapshot saved: {path}")
+                except Exception as e:
+                    print(f"{YELLOW} Failed to save HTML snapshot: {e}")
+
             profile_data = geomatch.get_dictionary() or {}
             profile_data["id"] = geomatch.get_id()
             profile_data["extracted_at"] = datetime.now().isoformat()
