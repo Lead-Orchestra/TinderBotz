@@ -22,33 +22,11 @@ class GeomatchHelper:
 
     def like(self)->bool:
         try:
-            # need to find better way
-            #if 'profile' in self.browser.current_url:
-            #    xpath = f'{content}/div/div[1]/div/main/div[1]/div/div/div[1]/div[2]/div/div/div[4]/button'
-
-                # wait for element to appear
-            #    WebDriverWait(self.browser, self.delay).until(EC.presence_of_element_located(
-            #        (By.XPATH, xpath)))
-
-                # locate like button
-            #    like_button = self.browser.find_element(By.XPATH, xpath)
-
-            #    like_button.click()
-
-            #else:
-            #    xpath = f'{content}/div/div[1]/div/main/div[1]/div/div/div[1]'
-
-            #    WebDriverWait(self.browser, self.delay).until(EC.presence_of_element_located(
-            #        (By.XPATH, xpath)))
-
-             #   card = self.browser.find_element(By.XPATH, xpath)
-
-            #    action = ActionChains(self.browser)
-           #    action.drag_and_drop_by_offset(card, 200, 0).perform()
+            if self._click_action_button("like"):
+                return True
 
             action = ActionChains(self.browser)
             action.send_keys(Keys.ARROW_RIGHT).perform()
-            #time.sleep(1)
             return True
 
         except (TimeoutException, ElementClickInterceptedException):
@@ -58,55 +36,31 @@ class GeomatchHelper:
 
     def dislike(self):
         try:
-            #if 'profile' in self.browser.current_url:
-            #    xpath = f'{content}/div/div[1]/div/main/div[1]/div/div/div[1]/div[2]/div/div/div[2]/button'
-                # wait for element to appear
-            #    WebDriverWait(self.browser, self.delay).until(EC.presence_of_element_located(
-            #        (By.XPATH, xpath)))
+            if self._click_action_button("dislike"):
+                return
 
-            #    dislike_button = self.browser.find_element(By.XPATH, xpath)
-
-            #    dislike_button.click()
-            #else:
-
-            #    xpath = f'{content}/div/div[1]/div/main/div[1]/div/div/div[1]'
-
-            #    WebDriverWait(self.browser, self.delay).until(EC.presence_of_element_located(
-            #        (By.XPATH, xpath)))
-
-            #    card = self.browser.find_element(By.XPATH, xpath)
-
-            #    action = ActionChains(self.browser)
-            #    action.drag_and_drop_by_offset(card, -200, 0).perform()
-            
             action = ActionChains(self.browser)
             action.send_keys(Keys.ARROW_LEFT).perform()
-
-            #time.sleep(1)
         except (TimeoutException, ElementClickInterceptedException):
             self._get_home_page()
 
     def superlike(self):
         try:
+            if self._click_action_button("superlike"):
+                time.sleep(1)
+                return
+
             if 'profile' in self.browser.current_url:
                 xpath = f'{content}/div/div[1]/div/main/div[1]/div/div/div[1]/div[2]/div/div/div[3]/div/div/div/button'
-
-                # wait for element to appear
                 WebDriverWait(self.browser, self.delay).until(EC.presence_of_element_located(
                     (By.XPATH, xpath)))
-
                 superlike_button = self.browser.find_element(By.XPATH, xpath)
-
                 superlike_button.click()
-
             else:
                 xpath = f'{content}/div/div[1]/div/main/div[1]/div/div/div[1]'
-
                 WebDriverWait(self.browser, self.delay).until(EC.presence_of_element_located(
                     (By.XPATH, xpath)))
-
                 card = self.browser.find_element(By.XPATH, xpath)
-
                 action = ActionChains(self.browser)
                 action.drag_and_drop_by_offset(card, 0, -200).perform()
 
@@ -114,6 +68,43 @@ class GeomatchHelper:
 
         except (TimeoutException, ElementClickInterceptedException):
             self._get_home_page()
+
+    def _click_action_button(self, action):
+        labels = {
+            "like": ["Like"],
+            "dislike": ["Nope", "Dislike"],
+            "superlike": ["Super Like", "Superlike"]
+        }.get(action, [])
+
+        testids = {
+            "like": ["like", "gamepadLike", "recLike"],
+            "dislike": ["nope", "gamepadDislike", "recNope"],
+            "superlike": ["superlike", "gamepadSuperlike", "recSuperLike"]
+        }.get(action, [])
+
+        selectors = []
+        for label in labels:
+            selectors.extend([
+                f"button[aria-label='{label}']",
+                f"div[role='button'][aria-label='{label}']"
+            ])
+        for tid in testids:
+            selectors.extend([
+                f"button[data-testid='{tid}']",
+                f"div[role='button'][data-testid='{tid}']"
+            ])
+
+        for selector in selectors:
+            try:
+                button = WebDriverWait(self.browser, 2).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                )
+                button.click()
+                return True
+            except Exception:
+                continue
+
+        return False
 
     def _open_profile(self, second_try=False):
         if self._is_profile_opened(): return;
@@ -133,9 +124,47 @@ class GeomatchHelper:
             #    except:
             #        continue
 
-            # New Implementation
+            # Prefer clicking the "Open profile" button within the active card
+            try:
+                card = self._get_active_card()
+                if card:
+                    buttons = card.find_elements(By.TAG_NAME, "button")
+                    for btn in buttons:
+                        try:
+                            span = btn.find_element(By.XPATH, ".//span[contains(., 'Open profile')]")
+                            if span:
+                                btn.click()
+                                return
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
+            # Try explicit open-profile selectors (Sparks layout)
+            try:
+                for selector in [
+                    "button[aria-label*='Open profile' i]",
+                    "button[data-testid*='profileOpen' i]",
+                    "button[data-testid*='openProfile' i]",
+                    "div[role='button'][aria-label*='Open profile' i]",
+                ]:
+                    try:
+                        btn = WebDriverWait(self.browser, 1).until(
+                            EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                        )
+                        btn.click()
+                        time.sleep(0.6)
+                        if self._is_profile_opened():
+                            return
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            # Fallback: keyboard shortcut
             action = ActionChains(self.browser)
             action.send_keys(Keys.ARROW_UP).perform()
+            time.sleep(0.6)
 
             #time.sleep(1)
 
@@ -151,7 +180,155 @@ class GeomatchHelper:
             if not second_try:
                 self._open_profile(second_try=True)
 
+    def _get_active_card(self):
+        try:
+            # Prefer the currently visible card
+            elements = self.browser.find_elements(By.CSS_SELECTOR, "div[data-keyboard-gamepad='true'][aria-hidden='false']")
+            if elements:
+                return elements[0]
+            # Fallback: card without aria-hidden (some layouts)
+            elements = self.browser.find_elements(By.CSS_SELECTOR, "div[data-keyboard-gamepad='true']:not([aria-hidden])")
+            if elements:
+                return elements[0]
+            # Last resort: any card in the stack
+            elements = self.browser.find_elements(By.CSS_SELECTOR, "div[data-keyboard-gamepad='true']")
+            if elements:
+                return elements[0]
+        except Exception:
+            return None
+        return None
+
+    def _get_profile_scope(self, open_if_needed=False):
+        active_name = None
+        try:
+            card = self._get_active_card()
+            if card:
+                name_el = card.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
+                if name_el and name_el[0].text:
+                    active_name = name_el[0].text.strip()
+        except Exception:
+            active_name = None
+
+        if open_if_needed and not self._is_profile_opened():
+            self._open_profile()
+            try:
+                WebDriverWait(self.browser, 2).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='dialog'], div[aria-modal='true']"))
+                )
+            except Exception:
+                pass
+
+        # Try to locate a modal/dialog that contains the active name
+        try:
+            dialogs = self.browser.find_elements(By.CSS_SELECTOR, "div[role='dialog'], div[aria-modal='true']")
+            for dlg in dialogs:
+                try:
+                    if active_name and active_name in (dlg.text or ""):
+                        return dlg, active_name
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # Fallback: scope to the active card's ancestor container
+        if active_name:
+            try:
+                name_candidates = self.browser.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
+                for cand in name_candidates:
+                    if (cand.text or "").strip() == active_name:
+                        try:
+                            return cand.find_element(By.XPATH, "./ancestor::button[1]"), active_name
+                        except Exception:
+                            try:
+                                return cand.find_element(By.XPATH, "./ancestor::div[1]"), active_name
+                            except Exception:
+                                return self.browser, active_name
+            except Exception:
+                pass
+
+        return self.browser, active_name
+
+    def get_socials(self, bio=None):
+        if not self._is_profile_opened():
+            self._open_profile()
+
+        socials = {
+            "instagram": None,
+            "tiktok": None,
+            "snapchat": None,
+            "twitter": None,
+            "onlyfans": None,
+            "spotify": None,
+            "links": []
+        }
+
+        # From bio text
+        if bio:
+            handle_match = re.findall(r'@([A-Za-z0-9_\\.]{3,})', bio)
+            if handle_match and not socials["instagram"]:
+                socials["instagram"] = handle_match[0]
+
+        # From modal/card links/text
+        try:
+            data = self.browser.execute_script(
+                """
+                const root = document.querySelector("div[role='dialog'], div[aria-modal='true']") 
+                    || document.querySelector("div[data-keyboard-gamepad='true'][aria-hidden='false']");
+                if (!root) return null;
+                const links = Array.from(root.querySelectorAll('a[href]')).map(a => a.href);
+                const text = root.innerText || '';
+                return { links, text };
+                """
+            )
+            if data and isinstance(data, dict):
+                links = data.get("links") or []
+                text = data.get("text") or ""
+                for link in links:
+                    if link and link not in socials["links"]:
+                        socials["links"].append(link)
+                    lower = (link or "").lower()
+                    if "instagram.com" in lower and not socials["instagram"]:
+                        socials["instagram"] = link.rstrip('/').split('/')[-1]
+                    if "tiktok.com" in lower and not socials["tiktok"]:
+                        socials["tiktok"] = link.rstrip('/').split('/')[-1].lstrip('@')
+                    if "snapchat.com" in lower and not socials["snapchat"]:
+                        socials["snapchat"] = link.rstrip('/').split('/')[-1]
+                    if ("twitter.com" in lower or "x.com" in lower) and not socials["twitter"]:
+                        socials["twitter"] = link.rstrip('/').split('/')[-1]
+                    if "onlyfans.com" in lower and not socials["onlyfans"]:
+                        socials["onlyfans"] = link.rstrip('/').split('/')[-1]
+                    if "spotify.com" in lower and not socials["spotify"]:
+                        socials["spotify"] = link
+
+                # Text-based hints (e.g., "Instagram" section)
+                if text:
+                    if not socials["instagram"]:
+                        m = re.search(r'instagram\\s*@?([A-Za-z0-9_\\.]{3,})', text, re.I)
+                        if m:
+                            socials["instagram"] = m.group(1)
+                    if not socials["tiktok"]:
+                        m = re.search(r'tiktok\\s*@?([A-Za-z0-9_\\.]{3,})', text, re.I)
+                        if m:
+                            socials["tiktok"] = m.group(1)
+                    if not socials["snapchat"]:
+                        m = re.search(r'snap(chat)?\\s*@?([A-Za-z0-9_\\.]{3,})', text, re.I)
+                        if m:
+                            socials["snapchat"] = m.group(2)
+        except Exception:
+            pass
+
+        return socials
+
     def get_name(self):
+        try:
+            card = self._get_active_card()
+            if card:
+                name_el = card.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
+                if name_el and name_el[0].text:
+                    return name_el[0].text.strip()
+        except Exception:
+            pass
+
         if not self._is_profile_opened():
             self._open_profile()
 
@@ -173,7 +350,41 @@ class GeomatchHelper:
         except Exception as e:
             pass
 
+        # Fallback: parse from aria-label on carousel
+        try:
+            sections = self.browser.find_elements(By.CSS_SELECTOR, "section[aria-label*='photos']")
+            for section in sections:
+                label = section.get_attribute("aria-label") or ""
+                if label:
+                    normalized = label.replace("’", "'")
+                    if "'s photos" in normalized:
+                        return normalized.split("'s photos")[0].strip()
+        except Exception:
+            pass
+
+        # Fallback: parse from card text
+        try:
+            text = self.browser.execute_script(
+                "const card=document.querySelector('.recsCardboard__cards'); return card?card.innerText:'';"
+            )
+            if text:
+                # Try to find a name at the start of the text
+                first_line = text.strip().split("\n")[0]
+                if first_line:
+                    return first_line.split(",")[0].strip()
+        except Exception:
+            pass
+
     def get_age(self):
+        try:
+            card = self._get_active_card()
+            if card:
+                age_el = card.find_elements(By.CSS_SELECTOR, "[itemprop='age']")
+                if age_el and age_el[0].text:
+                    return age_el[0].text.strip()
+        except Exception:
+            pass
+
         if not self._is_profile_opened():
             self._open_profile()
 
@@ -193,6 +404,25 @@ class GeomatchHelper:
                 age = None
 
         except:
+            pass
+
+        # Fallback: parse age from card text
+        try:
+            name = self.get_name()
+            text = self.browser.execute_script(
+                "const card=document.querySelector('.recsCardboard__cards'); return card?card.innerText:'';"
+            )
+            if text:
+                if name:
+                    pattern = re.compile(rf"{re.escape(name)}\\s*,?\\s*(\\d{{2}})")
+                    match = pattern.search(text)
+                    if match:
+                        return int(match.group(1))
+                # Generic age fallback (first 2-digit number)
+                match = re.search(r"\\b(1[8-9]|[2-5]\\d)\\b", text)
+                if match:
+                    return int(match.group(1))
+        except Exception:
             pass
 
         return age
@@ -217,43 +447,257 @@ class GeomatchHelper:
     _GENDER_SVG_PATH = "M15.507 13.032c1.14-.952 1.862-2.656 1.862-5.592C17.37 4.436 14.9 2 11.855 2 8.81 2 6.34 4.436 6.34 7.44c0 3.07.786 4.8 2.02 5.726-2.586 1.768-5.054 4.62-4.18 6.204 1.88 3.406 14.28 3.606 15.726 0 .686-1.71-1.828-4.608-4.4-6.338"
 
     def get_row_data(self):
-        if not self._is_profile_opened():
-            self._open_profile()
-
         rowdata = {}
 
-        xpath = '//div[@class="Row"]'
-        rows = self.browser.find_elements(By.XPATH, xpath)
+        # JS-based extraction from the active card (more reliable than XPath in dynamic layouts)
+        try:
+            data = self.browser.execute_script(
+                """
+                const card = document.querySelector("div[data-keyboard-gamepad='true'][aria-hidden='false']");
+                if (!card) return null;
+                const homeEl = card.querySelector("[itemprop='homeLocation']");
+                const textNodes = Array.from(card.querySelectorAll("div, span")).map(e => (e.textContent || "").trim()).filter(Boolean);
+                const distanceText = textNodes.find(t => /miles? away|kilometres? away|kilometers? away|km away/i.test(t));
+                const recentlyActive = textNodes.some(t => /recently active/i.test(t));
+                const verified = Array.from(card.querySelectorAll('title')).some(t => /photo verified/i.test(t.textContent || ''));
+                const rowTexts = Array.from(card.querySelectorAll("div[class*='Row']")).map(e => (e.textContent || "").trim()).filter(Boolean);
+                return {
+                    home: homeEl ? homeEl.textContent : null,
+                    distanceText: distanceText || null,
+                    recentlyActive,
+                    verified,
+                    rowTexts: rowTexts
+                };
+                """
+            )
+            if data:
+                home_text = (data.get("home") or "").strip() if isinstance(data, dict) else (data.get("home") if data else None)
+                if home_text and home_text.lower().startswith("lives in "):
+                    home_text = home_text[len("lives in "):].strip()
+                if home_text:
+                    rowdata['home'] = home_text
+                dist_text = data.get("distanceText") if isinstance(data, dict) else None
+                if dist_text:
+                    m = re.search(r'(\d+)', dist_text)
+                    if m:
+                        try:
+                            rowdata['distance'] = int(m.group(1))
+                        except ValueError:
+                            pass
+                    elif "less than" in dist_text.lower():
+                        rowdata['distance'] = 1
+                row_texts = data.get("rowTexts") if isinstance(data, dict) else []
+                if isinstance(data, dict):
+                    if data.get("recentlyActive"):
+                        rowdata["recently_active"] = True
+                    if data.get("verified"):
+                        rowdata["verified"] = True
+                if row_texts:
+                    for t in row_texts:
+                        if not t:
+                            continue
+                        lower = t.lower()
+                        if not rowdata.get('home') and lower.startswith("lives in "):
+                            rowdata['home'] = t[len("lives in "):].strip()
+                            continue
+                        if not rowdata.get('distance') and ("mile" in lower or "kilometre" in lower or "kilometer" in lower or "km away" in lower):
+                            m = re.search(r'(\d+)', t)
+                            if m:
+                                try:
+                                    rowdata['distance'] = int(m.group(1))
+                                except ValueError:
+                                    pass
+                            elif "less than" in lower:
+                                rowdata['distance'] = 1
+                            continue
+                        if not rowdata.get('gender'):
+                            if t in ["Woman", "Man", "Non-binary", "Nonbinary", "Transgender", "Agender", "Genderfluid", "Genderqueer"]:
+                                rowdata['gender'] = t
+                                continue
+                        if not rowdata.get('study'):
+                            if ("university" in lower) or ("college" in lower) or ("school" in lower) or ("studied" in lower):
+                                rowdata['study'] = t
+                                continue
+                        if not rowdata.get('work'):
+                            if (" at " in lower) and ("university" not in lower) and ("college" not in lower) and ("school" not in lower):
+                                rowdata['work'] = t
+                                continue
+        except Exception:
+            pass
+
+        # Sparks essentials (profile modal) parsing
+        try:
+            scope, _ = self._get_profile_scope(open_if_needed=True)
+            essentials = self.browser.execute_script(
+                """
+                const root = arguments[0];
+                if (!root) return [];
+                const h2s = Array.from(root.querySelectorAll('h2'));
+                const norm = (s) => (s || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+                const textOf = (el) => (el && (el.textContent || '').trim()) || '';
+                for (const h2 of h2s) {
+                    if (norm(textOf(h2)) !== 'essentials') continue;
+                    const section = h2.closest('section') || h2.closest('div');
+                    if (!section) break;
+                    const items = Array.from(section.querySelectorAll('li')).map((li) => {
+                        const v = textOf(li.querySelector('div[class*=\"Typs(body-1-regular)\"]')) || textOf(li);
+                        return v;
+                    }).filter(Boolean);
+                    return items;
+                }
+                return [];
+                """,
+                scope
+            )
+            if essentials and isinstance(essentials, list):
+                for item in essentials:
+                    if not item:
+                        continue
+                    lower = item.lower()
+                    if not rowdata.get('home') and lower.startswith("lives in "):
+                        rowdata['home'] = item[len("lives in "):].strip()
+                        continue
+                    if not rowdata.get('distance') and ("mile" in lower or "kilometre" in lower or "kilometer" in lower or "km away" in lower):
+                        m = re.search(r'(\\d+)', item)
+                        if m:
+                            try:
+                                rowdata['distance'] = int(m.group(1))
+                            except ValueError:
+                                pass
+                        elif "less than" in lower:
+                            rowdata['distance'] = 1
+                        continue
+                    if not rowdata.get('gender'):
+                        if lower in [
+                            "woman", "man", "non-binary", "nonbinary", "transgender", "agender",
+                            "genderfluid", "genderqueer", "bisexual", "straight", "gay", "lesbian",
+                            "pansexual", "queer", "asexual"
+                        ]:
+                            rowdata['gender'] = item
+                            continue
+                    if not rowdata.get('work'):
+                        if not re.search(r'\\d', item) and len(item.split()) <= 4:
+                            rowdata['work'] = item
+        except Exception:
+            pass
+
+        if rowdata:
+            return rowdata
+
+        # Try to parse from the active card on the recs page
+        try:
+            card = self._get_active_card()
+            if card:
+                try:
+                    home_el = card.find_element(By.CSS_SELECTOR, "[itemprop='homeLocation']")
+                    home_text = home_el.text.strip()
+                    if home_text.lower().startswith("lives in "):
+                        home_text = home_text[len("lives in "):].strip()
+                    if home_text:
+                        rowdata['home'] = home_text
+                except Exception:
+                    pass
+
+                try:
+                    distance_els = card.find_elements(
+                        By.XPATH,
+                        ".//*[contains(text(), 'miles away') or contains(text(), 'kilometres away') or contains(text(), 'kilometers away') or contains(text(), 'km away') or contains(text(), 'mile away')]"
+                    )
+                    for el in distance_els:
+                        value = (el.text or "").strip()
+                        if value:
+                            distance = None
+                            # Extract first number from distance text
+                            m = re.search(r'(\d+)', value)
+                            if m:
+                                try:
+                                    distance = int(m.group(1))
+                                except ValueError:
+                                    distance = None
+                            else:
+                                if "less than" in value.lower():
+                                    distance = 1
+                            if distance is not None:
+                                rowdata['distance'] = distance
+                                break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        if rowdata:
+            return rowdata
+
+        scope, _ = self._get_profile_scope(open_if_needed=True)
+
+        xpath = './/div[contains(@class,"Row")]'
+        rows = scope.find_elements(By.XPATH, xpath)
 
         for row in rows:
-            svg = row.find_element(By.XPATH, ".//*[starts-with(@d, 'M')]").get_attribute('d')
-            value = row.find_element(By.XPATH, ".//div[2]").text
-            if svg == self._WORK_SVG_PATH:
-                rowdata['work'] = value
-            if svg == self._STUDYING_SVG_PATH:
-                rowdata['study'] = value
-            if svg == self._HOME_SVG_PATH:
-                rowdata['home'] = value.split(' ')[-1]
-            if svg == self._GENDER_SVG_PATH:
-                rowdata['gender'] = value
-            if svg == self._LOCATION_SVG_PATH or svg == self._LOCATION_SVG_PATH_2:
-                distance = value.split(' ')[0]
+            value = None
+            try:
+                value = row.find_element(By.XPATH, ".//div[2]").text
+            except Exception:
                 try:
-                    distance = int(distance)
-                except TypeError:
-                    # Means the text has a value of 'Less than 1 km away'
-                    distance = 1
-                except ValueError:
-                    distance = None
+                    value = row.text
+                except Exception:
+                    value = None
 
-                rowdata['distance'] = distance
+            svg = None
+            try:
+                svg = row.find_element(By.XPATH, ".//*[starts-with(@d, 'M')]").get_attribute('d')
+            except Exception:
+                svg = None
+
+            if svg:
+                if svg == self._WORK_SVG_PATH:
+                    rowdata['work'] = value
+                if svg == self._STUDYING_SVG_PATH:
+                    rowdata['study'] = value
+                if svg == self._HOME_SVG_PATH:
+                    home_value = value
+                    if home_value and home_value.lower().startswith("lives in "):
+                        home_value = home_value[len("lives in "):].strip()
+                    rowdata['home'] = home_value
+                if svg == self._GENDER_SVG_PATH:
+                    rowdata['gender'] = value
+                if svg == self._LOCATION_SVG_PATH or svg == self._LOCATION_SVG_PATH_2:
+                    distance = value.split(' ')[0] if value else None
+                    try:
+                        distance = int(distance)
+                    except TypeError:
+                        distance = 1
+                    except ValueError:
+                        distance = 1 if value and "less than" in value.lower() else None
+                    rowdata['distance'] = distance
+
+            # Fallbacks based on text/attributes
+            try:
+                home_el = row.find_elements(By.CSS_SELECTOR, "[itemprop='homeLocation']")
+                if home_el:
+                    home_text = (home_el[0].text or "").strip()
+                    if home_text.lower().startswith("lives in "):
+                        home_text = home_text[len("lives in "):].strip()
+                    if home_text:
+                        rowdata['home'] = home_text
+            except Exception:
+                pass
+
+            if value:
+                lower = value.lower()
+                if "mile" in lower or "kilometre" in lower or "kilometer" in lower or "km away" in lower:
+                    m = re.search(r'(\d+)', value)
+                    if m:
+                        try:
+                            rowdata['distance'] = int(m.group(1))
+                        except ValueError:
+                            pass
+                    elif "less than" in lower:
+                        rowdata['distance'] = 1
 
         return rowdata
 
     def get_bio_and_passions(self):
-        if not self._is_profile_opened():
-            self._open_profile()
-
         bio = None
         looking_for = None
 
@@ -267,17 +711,196 @@ class GeomatchHelper:
 
         lifestyle = []
 
+        # Try to parse from the active card on the recs page
+        try:
+            card = self._get_active_card()
+            if card:
+                try:
+                    headings = card.find_elements(By.TAG_NAME, "h2")
+                    for h in headings:
+                        label = (h.text or "").strip().lower()
+                        if not label:
+                            continue
+                        if label in ["about me", "bio"]:
+                            try:
+                                parent = h.find_element(By.XPATH, "./..")
+                                content = parent.find_element(By.XPATH, "./following-sibling::*[1]")
+                                text = content.text.strip()
+                                if text:
+                                    bio = text
+                            except Exception:
+                                pass
+                        if label in ["interests", "passions", "lifestyle", "basics"]:
+                            try:
+                                parent = h.find_element(By.XPATH, "./..")
+                                container = parent.find_element(By.XPATH, "./following-sibling::*[1]")
+                                chips = []
+                                for span in container.find_elements(By.TAG_NAME, "span"):
+                                    text = (span.text or "").strip()
+                                    if text:
+                                        chips.append(text)
+                                if chips:
+                                    if label == "interests" or label == "passions":
+                                        infoItems["passions"] = chips
+                                    elif label == "lifestyle":
+                                        infoItems["lifestyle"] = chips
+                                    elif label == "basics":
+                                        infoItems["basics"] = chips
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        scope, _ = self._get_profile_scope(open_if_needed=True)
+
+        # Sparks layout extraction (profile modal content)
+        try:
+            spark = self.browser.execute_script(
+                """
+                const root = arguments[0];
+                const out = { about: null, looking_for: null, interests: [], lifestyle: [], more_about: [], essentials: [], looking_for_tags: [] };
+                if (!root) return out;
+                const norm = (s) => (s || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+                const textOf = (el) => (el && (el.textContent || '').trim()) || '';
+
+                const headings = Array.from(root.querySelectorAll('h2'));
+                for (const h2 of headings) {
+                    const title = norm(textOf(h2));
+                    if (!title) continue;
+                    const section = h2.closest('section') || h2.closest('div');
+                    if (!section) continue;
+
+                    if (title === 'about me') {
+                        const aboutEl = section.querySelector('div[class*="Typs(body-1-regular)"]') || section;
+                        const txt = textOf(aboutEl);
+                        if (txt) out.about = txt;
+                    } else if (title === 'looking for') {
+                        const primary = section.querySelector('span[class*="Typs(display-3-strong)"], div[class*="Typs(display-3-strong)"]');
+                        const primaryText = textOf(primary);
+                        if (primaryText) out.looking_for = primaryText;
+
+                        const chips = Array.from(section.querySelectorAll('div[class*="Bdrs(30px)"]'))
+                            .map((el) => textOf(el))
+                            .filter(Boolean);
+                        for (const chip of chips) {
+                            if (!out.looking_for_tags.includes(chip)) out.looking_for_tags.push(chip);
+                        }
+                    } else if (title === 'interests') {
+                        const chips = Array.from(section.querySelectorAll('li span, li div'))
+                            .map((el) => textOf(el))
+                            .filter((t) => t && t.length < 80);
+                        for (const chip of chips) {
+                            if (!out.interests.includes(chip)) out.interests.push(chip);
+                        }
+                    } else if (title === 'lifestyle') {
+                        const items = Array.from(section.querySelectorAll('li'));
+                        for (const li of items) {
+                            const label = textOf(li.querySelector('h3'));
+                            const value = textOf(li.querySelector('div[class*="Typs(body-1-regular)"]'));
+                            if (label && value) out.lifestyle.push(`${label}: ${value}`);
+                        }
+                    } else if (title === 'more about me') {
+                        const items = Array.from(section.querySelectorAll('li'));
+                        for (const li of items) {
+                            const label = textOf(li.querySelector('h3'));
+                            const value = textOf(li.querySelector('div[class*="Typs(body-1-regular)"]'));
+                            if (label && value) out.more_about.push(`${label}: ${value}`);
+                        }
+                    } else if (title === 'essentials') {
+                        const items = Array.from(section.querySelectorAll('li'));
+                        for (const li of items) {
+                            const value = textOf(li.querySelector('div[class*="Typs(body-1-regular)"]')) || textOf(li);
+                            if (value) out.essentials.push(value);
+                        }
+                    }
+                }
+
+                return out;
+                """,
+                scope
+            )
+            if spark and isinstance(spark, dict):
+                about = spark.get("about")
+                if about and not bio:
+                    bio = about
+                if spark.get("looking_for") and not looking_for:
+                    looking_for = spark.get("looking_for")
+                if spark.get("interests"):
+                    infoItems["passions"] = spark.get("interests")
+                if spark.get("lifestyle"):
+                    infoItems["lifestyle"] = spark.get("lifestyle")
+                if spark.get("more_about"):
+                    infoItems["basics"] = spark.get("more_about")
+                if spark.get("looking_for_tags"):
+                    for tag in spark.get("looking_for_tags") or []:
+                        if tag and tag not in infoItems["basics"]:
+                            infoItems["basics"].append(tag)
+                if spark.get("essentials"):
+                    for item in spark.get("essentials") or []:
+                        if item and item not in infoItems["basics"]:
+                            infoItems["basics"].append(item)
+        except Exception:
+            pass
+
+        # JS-based extraction for sections on active card/modal
+        if not bio or not infoItems["passions"] or not infoItems["lifestyle"] or not infoItems["basics"] or not looking_for or not anthem:
+            try:
+                data = self.browser.execute_script(
+                    """
+                    const card = document.querySelector("div[data-keyboard-gamepad='true'][aria-hidden='false']") || document.querySelector("div[role='dialog'], div[aria-modal='true']");
+                    if (!card) return null;
+                    const sections = [];
+                    const headings = Array.from(card.querySelectorAll('h2'));
+                    for (const h of headings) {
+                        const label = (h.textContent || '').trim();
+                        if (!label) continue;
+                        let container = h.parentElement ? h.parentElement.nextElementSibling : null;
+                        if (!container && h.parentElement && h.parentElement.parentElement) {
+                            container = h.parentElement.parentElement.nextElementSibling;
+                        }
+                        let chips = [];
+                        if (container) {
+                            chips = Array.from(container.querySelectorAll('span')).map(s => (s.textContent || '').trim()).filter(Boolean);
+                        }
+                        const text = container ? (container.textContent || '').trim() : '';
+                        sections.push({label, text, chips});
+                    }
+                    return {sections};
+                    """
+                )
+                if data and isinstance(data, dict):
+                    for sec in data.get("sections", []):
+                        label = (sec.get("label") or "").strip().lower()
+                        text = (sec.get("text") or "").strip()
+                        chips = [c for c in (sec.get("chips") or []) if c]
+                        if label in ["about me", "bio"] and text and not bio:
+                            bio = text
+                        elif label in ["interests", "passions"] and chips and not infoItems["passions"]:
+                            infoItems["passions"] = chips
+                        elif label == "lifestyle" and chips and not infoItems["lifestyle"]:
+                            infoItems["lifestyle"] = chips
+                        elif label == "basics" and chips and not infoItems["basics"]:
+                            infoItems["basics"] = chips
+                        elif "looking for" in label and text and not looking_for:
+                            looking_for = text
+                        elif label == "my anthem" and text and not anthem:
+                            anthem = text
+            except Exception:
+                pass
+
 
         # Bio
         try:
-            bio = self.browser.find_element(By.CSS_SELECTOR, 'div[class*="Px(16px) Py(12px) Us(t)"').text
+            bio = scope.find_element(By.CSS_SELECTOR, 'div[class*="Px(16px) Py(12px) Us(t)"').text
 
         except Exception as e:
             pass
 
         # Looking for
         try:
-            looking_for_el = self.browser.find_element(By.CSS_SELECTOR, 'div[class="Px(16px) My(12px)"]>div[class="D(b)"]')
+            looking_for_el = scope.find_element(By.CSS_SELECTOR, 'div[class="Px(16px) My(12px)"]>div[class="D(b)"]')
             looking_for = looking_for_el.find_element(By.CSS_SELECTOR, 'div[class="Typs(subheading-1) CenterAlign"]').text
 
         except Exception as e:
@@ -285,7 +908,7 @@ class GeomatchHelper:
 
         # Basics, Lifestyle and Passions
         try:
-            sections = self.browser.find_elements(By.CSS_SELECTOR, "div[class='Px(16px) Py(12px)']")
+            sections = scope.find_elements(By.CSS_SELECTOR, "div[class='Px(16px) Py(12px)']")
             for section in sections:
                 headline = section.find_element(By.TAG_NAME, "h2").text.lower()
                 
@@ -315,60 +938,114 @@ class GeomatchHelper:
         return bio, infoItems["passions"], infoItems["lifestyle"], infoItems["basics"], anthem, looking_for
 
     def get_image_urls(self, quickload=True):
+        image_urls = []
+
+        def add_url(url):
+            if not url:
+                return
+            if 'static-assets' in url or '/icons/' in url:
+                return
+            # Only keep full-size profile images (avoid tiny avatars like 172x216)
+            if '/172x216_' in url:
+                return
+            if 'images-ssl.gotinder.com/u/' in url or 'images.gotinder.com/u/' in url or 'gotinder.com/u/' in url:
+                if url not in image_urls:
+                    image_urls.append(url)
+
+        # Prefer images from the active card on the recs page
+        try:
+            card = self._get_active_card()
+            active_name = None
+            try:
+                if card:
+                    name_el = card.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
+                    if name_el and name_el[0].text:
+                        active_name = name_el[0].text.strip()
+                if active_name:
+                    name_candidates = self.browser.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
+                    for cand in name_candidates:
+                        if (cand.text or "").strip() == active_name:
+                            try:
+                                card = cand.find_element(By.XPATH, "./ancestor::div[@data-keyboard-gamepad='true'][1]")
+                            except Exception:
+                                pass
+                            break
+            except Exception:
+                pass
+
+            if card:
+                elements = card.find_elements(By.CSS_SELECTOR, "div[aria-label^='Profile photo'][style*='background-image']")
+                for element in elements:
+                    style = element.value_of_css_property('background-image')
+                    if style and 'url(' in style:
+                        parts = style.split('\"')
+                        if len(parts) > 1:
+                            add_url(parts[1])
+        except Exception:
+            pass
+
+        if image_urls:
+            return image_urls
+
         if not self._is_profile_opened():
             self._open_profile()
 
-        image_urls = []
+        scope, _ = self._get_profile_scope(open_if_needed=True)
 
-        # only get url of first few images, and not click all bullets to get all image
-        elements = self.browser.find_elements(By.XPATH, "//div[@aria-label='Profile slider']")
-        for element in elements:
-            image_url = element.value_of_css_property('background-image').split('\"')[1]
-            if image_url not in image_urls:
-                image_urls.append(image_url)
+        # Primary selector (legacy) scoped
+        try:
+            elements = scope.find_elements(By.XPATH, ".//div[@aria-label='Profile slider']")
+            for element in elements:
+                style = element.value_of_css_property('background-image')
+                if style and 'url(' in style:
+                    image_url = style.split('\"')[1]
+                    add_url(image_url)
+        except Exception:
+            pass
 
-        # return image urls without opening all images
-        if quickload:
+        # Fallback: any element with background-image in style scoped
+        try:
+            elements = scope.find_elements(By.CSS_SELECTOR, "div[style*='background-image']")
+            for element in elements:
+                style = element.value_of_css_property('background-image')
+                if style and 'url(' in style:
+                    parts = style.split('\"')
+                    if len(parts) > 1:
+                        add_url(parts[1])
+        except Exception:
+            pass
+
+        # Fallback: image tags scoped
+        try:
+            img_elements = scope.find_elements(By.CSS_SELECTOR, "img[src]")
+            for img in img_elements:
+                src = img.get_attribute("src")
+                add_url(src)
+        except Exception:
+            pass
+
+        if quickload or len(image_urls) > 0:
             return image_urls
 
+        # Optional: click through bullets if present
         try:
-            # There are no bullets when there is only 1 image
             classname = 'bullet'
-
-            # wait for element to appear
-            WebDriverWait(self.browser, self.delay).until(EC.presence_of_element_located(
-                (By.CLASS_NAME, classname)))
-
+            WebDriverWait(self.browser, self.delay).until(
+                EC.presence_of_element_located((By.CLASS_NAME, classname))
+            )
             image_btns = self.browser.find_elements_by_class_name(classname)
-
             for btn in image_btns:
                 btn.click()
                 time.sleep(1)
-
-                elements = self.browser.find_elements(By.XPATH, "//div[@aria-label='Profile slider']")
+                elements = self.browser.find_elements(By.CSS_SELECTOR, "div[style*='background-image']")
                 for element in elements:
-                    image_url = element.value_of_css_property('background-image').split('\"')[1]
-                    if image_url not in image_urls:
-                        image_urls.append(image_url)
-
-        except StaleElementReferenceException:
+                    style = element.value_of_css_property('background-image')
+                    if style and 'url(' in style:
+                        parts = style.split('\"')
+                        if len(parts) > 1:
+                            add_url(parts[1])
+        except Exception:
             pass
-
-        except TimeoutException:
-            # there is only 1 image, so no bullets to iterate through
-            try:
-                element = self.browser.find_element(By.XPATH, "//div[@aria-label='Profile slider']")
-                image_url = element.value_of_css_property('background-image').split('\"')[1]
-                if image_url not in image_urls:
-                    image_urls.append(image_url)
-
-            except Exception as e:
-                print("unhandled Exception when trying to store their only image")
-                print(e)
-
-        except Exception as e:
-            print("unhandled exception getImageUrls in geomatch_helper")
-            print(e)
 
         return image_urls
 
@@ -445,7 +1122,14 @@ class GeomatchHelper:
         time.sleep(5)
 
     def _is_profile_opened(self):
-        if '/profile' in self.browser.current_url:
-            return True
-        else:
-            return False
+        try:
+            if '/profile' in self.browser.current_url:
+                return True
+            # Sparks layout keeps URL at /app/recs; detect profile back button/content
+            if self.browser.find_elements(By.CSS_SELECTOR, "[data-testid='profileBackButton']"):
+                return True
+            if self.browser.find_elements(By.CSS_SELECTOR, ".profileContent"):
+                return True
+        except Exception:
+            pass
+        return False

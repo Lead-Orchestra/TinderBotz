@@ -299,16 +299,19 @@ class Session:
 
             bio, passions, lifestyle, basics, anthem, looking_for = helper.get_bio_and_passions()
             image_urls = helper.get_image_urls(quickload)
-            instagram = helper.get_insta(bio)
+            socials = helper.get_socials(bio)
+            instagram = socials.get("instagram") or helper.get_insta(bio)
             rowdata = helper.get_row_data()
             work = rowdata.get('work')
             study = rowdata.get('study')
             home = rowdata.get('home')
             distance = rowdata.get('distance')
             gender = rowdata.get('gender')
+            verified = rowdata.get('verified')
+            recently_active = rowdata.get('recently_active')
 
             return Geomatch(name=name, age=age, work=work, gender=gender, study=study, home=home, distance=distance,
-                            bio=bio, passions=passions, lifestyle=lifestyle, basics=basics, anthem=anthem, looking_for=looking_for, image_urls=image_urls, instagram=instagram)
+                            bio=bio, passions=passions, lifestyle=lifestyle, basics=basics, anthem=anthem, looking_for=looking_for, image_urls=image_urls, instagram=instagram, socials=socials, verified=verified, recently_active=recently_active)
 
     def get_chat_ids(self, new=True, messaged=True):
         if self._is_logged_in():
@@ -514,4 +517,3 @@ class Session:
             print(f"You've liked {self.session_data['like']} profiles during this session.")
         if dislikes > 0:
             print(f"You've disliked {self.session_data['dislike']} profiles during this session.")
-

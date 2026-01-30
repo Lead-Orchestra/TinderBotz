@@ -14,6 +14,8 @@ from platform import system
 from sqlite3 import OperationalError, connect
 import json
 import sys
+import os
+import re
 
 # Color output (simple ASCII for cross-platform compatibility)
 GREEN = "[OK]"
@@ -23,21 +25,21 @@ CYAN = "[*]"
 
 
 def has_tinder_cookies(cookiefile, is_firefox=True):
-    """Check if a cookie file contains Tinder cookies."""
+    """Check if a cookie file contains Tinder or GoTinder cookies."""
     try:
         if is_firefox:
             conn = connect(f"file:{cookiefile}?immutable=1", uri=True)
             try:
                 # Try modern Firefox cookie schema first - check for Tinder cookies
                 result = conn.execute(
-                    "SELECT COUNT(*) FROM moz_cookies WHERE baseDomain='tinder.com' OR baseDomain='.tinder.com'"
+                    "SELECT COUNT(*) FROM moz_cookies WHERE baseDomain IN ('tinder.com', 'gotinder.com') OR baseDomain IN ('.tinder.com', '.gotinder.com')"
                 ).fetchone()
                 if result and result[0] > 0:
                     return True
             except OperationalError:
                 # Fallback to host-based query
                 result = conn.execute(
-                    "SELECT COUNT(*) FROM moz_cookies WHERE host LIKE '%tinder.com'"
+                    "SELECT COUNT(*) FROM moz_cookies WHERE host LIKE '%tinder.com' OR host LIKE '%gotinder.com'"
                 ).fetchone()
                 if result and result[0] > 0:
                     return True
@@ -45,7 +47,7 @@ def has_tinder_cookies(cookiefile, is_firefox=True):
             # Chrome/Edge cookie schema
             conn = connect(f"file:{cookiefile}?immutable=1", uri=True)
             result = conn.execute(
-                "SELECT COUNT(*) FROM cookies WHERE host_key LIKE '%tinder.com'"
+                "SELECT COUNT(*) FROM cookies WHERE host_key LIKE '%tinder.com' OR host_key LIKE '%gotinder.com'"
             ).fetchone()
             if result and result[0] > 0:
                 return True
@@ -198,18 +200,18 @@ def get_edge_cookie_files():
 
 
 def extract_cookies_from_firefox(cookiefile):
-    """Extract Tinder cookies from Firefox cookie database."""
+    """Extract Tinder/GoTinder cookies from Firefox cookie database."""
     try:
         conn = connect(f"file:{cookiefile}?immutable=1", uri=True)
         
         # Try multiple query strategies
         queries = [
             # Try baseDomain first (modern Firefox schema)
-            "SELECT name, value, host, path, expiry, isSecure, isHttpOnly FROM moz_cookies WHERE (baseDomain='tinder.com' OR baseDomain='.tinder.com')",
+            "SELECT name, value, host, path, expiry, isSecure, isHttpOnly FROM moz_cookies WHERE (baseDomain IN ('tinder.com','gotinder.com') OR baseDomain IN ('.tinder.com','.gotinder.com'))",
             # Fallback to host-based query
-            "SELECT name, value, host, path, expiry, isSecure, isHttpOnly FROM moz_cookies WHERE (host='tinder.com' OR host='.tinder.com' OR host='www.tinder.com' OR host LIKE '%.tinder.com')",
+            "SELECT name, value, host, path, expiry, isSecure, isHttpOnly FROM moz_cookies WHERE (host='tinder.com' OR host='.tinder.com' OR host='www.tinder.com' OR host LIKE '%.tinder.com' OR host='gotinder.com' OR host='.gotinder.com' OR host LIKE '%.gotinder.com')",
             # Try with any Tinder domain
-            "SELECT name, value, host, path, expiry, isSecure, isHttpOnly FROM moz_cookies WHERE host LIKE '%tinder.com'",
+            "SELECT name, value, host, path, expiry, isSecure, isHttpOnly FROM moz_cookies WHERE host LIKE '%tinder.com' OR host LIKE '%gotinder.com'",
         ]
         
         for query in queries:
@@ -244,15 +246,15 @@ def extract_cookies_from_firefox(cookiefile):
 
 
 def extract_cookies_from_chrome_edge(cookiefile):
-    """Extract Tinder cookies from Chrome/Edge cookie database."""
+    """Extract Tinder/GoTinder cookies from Chrome/Edge cookie database."""
     try:
         # Try read-only access first
         conn = connect(f"file:{cookiefile}?immutable=1", uri=True)
         
         queries = [
-            "SELECT name, value, host_key, path, expires_utc, is_secure, is_httponly FROM cookies WHERE host_key LIKE '%tinder.com'",
-            "SELECT name, value, host_key, path, expires_utc, is_secure, is_httponly FROM cookies WHERE host_key LIKE '%.tinder.com'",
-            "SELECT name, value, host_key, path, expires_utc, is_secure, is_httponly FROM cookies WHERE host_key='www.tinder.com'",
+            "SELECT name, value, host_key, path, expires_utc, is_secure, is_httponly FROM cookies WHERE host_key LIKE '%tinder.com' OR host_key LIKE '%gotinder.com'",
+            "SELECT name, value, host_key, path, expires_utc, is_secure, is_httponly FROM cookies WHERE host_key LIKE '%.tinder.com' OR host_key LIKE '%.gotinder.com'",
+            "SELECT name, value, host_key, path, expires_utc, is_secure, is_httponly FROM cookies WHERE host_key='www.tinder.com' OR host_key='www.gotinder.com'",
         ]
         
         for query in queries:
@@ -301,7 +303,133 @@ def extract_cookies_from_chrome_edge(cookiefile):
     return None
 
 
-def extract_tinder_cookies(browser=None, output_file='tinder_cookies.json', quiet=False):
+def extract_firefox_localstorage(profile_dir):
+    """Extract localStorage key/value pairs for tinder.com and gotinder.com from Firefox profile."""
+    origins = {
+        "https://tinder.com": os.path.join(profile_dir, "storage", "default", "https+++tinder.com", "ls", "data.sqlite"),
+        "https://gotinder.com": os.path.join(profile_dir, "storage", "default", "https+++gotinder.com", "ls", "data.sqlite"),
+    }
+
+    storage = {}
+    for origin, db_path in origins.items():
+        if not exists(db_path):
+            continue
+        try:
+            conn = connect(f"file:{db_path}?immutable=1", uri=True)
+            rows = []
+            try:
+                rows = conn.execute("SELECT key, value FROM data").fetchall()
+            except OperationalError:
+                try:
+                    rows = conn.execute("SELECT key, value FROM webappsstore2").fetchall()
+                except OperationalError:
+                    rows = []
+            conn.close()
+
+            if rows:
+                origin_data = {}
+                for key, value in rows:
+                    if isinstance(value, bytes):
+                        try:
+                            value = value.decode("utf-8")
+                        except Exception:
+                            value = value.decode("utf-8", errors="ignore")
+                    origin_data[str(key)] = value
+                storage[origin] = origin_data
+        except Exception as e:
+            print(f"{YELLOW} Warning: Could not extract localStorage from {db_path}: {e}")
+
+    return storage
+
+
+def extract_firefox_indexeddb(profile_dir):
+    """Extract token-like entries from Firefox IndexedDB for tinder.com/gotinder.com."""
+    idb_roots = {
+        "https://tinder.com": os.path.join(profile_dir, "storage", "default", "https+++tinder.com", "idb"),
+        "https://gotinder.com": os.path.join(profile_dir, "storage", "default", "https+++gotinder.com", "idb"),
+    }
+
+    token_pattern = re.compile(r"(access_token|refresh_token|id_token|auth|token|session)", re.IGNORECASE)
+    results = {"origins": {}, "tokens": {}}
+
+    for origin, root in idb_roots.items():
+        if not exists(root):
+            continue
+
+        origin_matches = []
+        sqlite_files = [f for f in glob(os.path.join(root, "*.sqlite"))]
+        for db_path in sqlite_files:
+            try:
+                conn = connect(f"file:{db_path}?immutable=1", uri=True)
+                tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+                for table in tables:
+                    try:
+                        cols = [r[1] for r in conn.execute(f"PRAGMA table_info('{table}')").fetchall()]
+                    except Exception:
+                        cols = []
+                    if not cols:
+                        continue
+
+                    # Try to read a subset of rows to avoid huge output
+                    try:
+                        rows = conn.execute(f"SELECT * FROM '{table}' LIMIT 500").fetchall()
+                    except Exception:
+                        continue
+
+                    for row in rows:
+                        for idx, value in enumerate(row):
+                            if value is None:
+                                continue
+                            text = None
+                            if isinstance(value, bytes):
+                                try:
+                                    text = value.decode("utf-8")
+                                except Exception:
+                                    text = value.decode("utf-8", errors="ignore")
+                            elif isinstance(value, str):
+                                text = value
+                            else:
+                                continue
+
+                            if not text:
+                                continue
+                            if token_pattern.search(text):
+                                entry = {
+                                    "db": os.path.basename(db_path),
+                                    "table": table,
+                                    "column": cols[idx] if idx < len(cols) else str(idx),
+                                    "value": text[:500],
+                                }
+                                origin_matches.append(entry)
+
+                                # Try to parse JSON and extract token-like fields
+                                try:
+                                    parsed = json.loads(text)
+                                    if isinstance(parsed, dict):
+                                        for k, v in parsed.items():
+                                            if isinstance(k, str) and token_pattern.search(k):
+                                                if isinstance(v, (str, int, float)):
+                                                    results["tokens"][k] = str(v)
+                                    elif isinstance(parsed, list):
+                                        for item in parsed:
+                                            if isinstance(item, dict):
+                                                for k, v in item.items():
+                                                    if isinstance(k, str) and token_pattern.search(k):
+                                                        if isinstance(v, (str, int, float)):
+                                                            results["tokens"][k] = str(v)
+                                except Exception:
+                                    pass
+                conn.close()
+            except Exception:
+                continue
+
+        if origin_matches:
+            results["origins"][origin] = origin_matches
+
+    return results
+
+
+def extract_tinder_cookies(browser=None, output_file='tinder_cookies.json', quiet=False, localstorage_output=None, idb_output=None):
     """
     Extract Tinder cookies from browser cookie databases.
     
@@ -315,6 +443,7 @@ def extract_tinder_cookies(browser=None, output_file='tinder_cookies.json', quie
     
     cookies = None
     found_in_browser = None
+    found_cookiefile = None
     
     # Try Firefox
     if not browser or browser.lower() == 'firefox':
@@ -332,6 +461,7 @@ def extract_tinder_cookies(browser=None, output_file='tinder_cookies.json', quie
                     if not quiet:
                         print(f"{GREEN} Found {len(cookies)} Tinder cookies in Firefox: {cookiefile}")
                     found_in_browser = 'Firefox'
+                    found_cookiefile = cookiefile
                     break
         else:
             if not quiet:
@@ -355,6 +485,7 @@ def extract_tinder_cookies(browser=None, output_file='tinder_cookies.json', quie
                         if not quiet:
                             print(f"{GREEN} Found {len(cookies)} Tinder cookies in Chrome: {cookiefile}")
                         found_in_browser = 'Chrome'
+                        found_cookiefile = cookiefile
                         break
                 except Exception as e:
                     if 'database is locked' in str(e).lower() or 'locked' in str(e).lower():
@@ -384,6 +515,7 @@ def extract_tinder_cookies(browser=None, output_file='tinder_cookies.json', quie
                         if not quiet:
                             print(f"{GREEN} Found {len(cookies)} Tinder cookies in Edge: {cookiefile}")
                         found_in_browser = 'Edge'
+                        found_cookiefile = cookiefile
                         break
                 except Exception as e:
                     if 'database is locked' in str(e).lower() or 'locked' in str(e).lower():
@@ -411,7 +543,7 @@ def extract_tinder_cookies(browser=None, output_file='tinder_cookies.json', quie
             json.dump(cookies, f, indent=2, ensure_ascii=False)
         
         # Check if we got authentication cookies or just load balancer cookies
-        auth_cookie_names = ['TinderID', 'id_token', 'access_token', 'sessionid', 'session_id', '__cf_bm']
+        auth_cookie_names = ['TinderID', 'id_token', 'access_token', 'sessionid', 'session_id', '__cf_bm', 'tinderweb', 'auth', 'session']
         found_auth_cookies = any(c['name'] in auth_cookie_names for c in cookies)
         found_only_load_balancer = all(c['name'] in ['AWSALB', 'AWSALBCORS', 'g_state'] for c in cookies)
         
@@ -431,6 +563,37 @@ def extract_tinder_cookies(browser=None, output_file='tinder_cookies.json', quie
                 print(f"{YELLOW} Note: Authentication cookies (TinderID, id_token, access_token) not found")
                 print(f"{YELLOW} If login fails, you may need to complete manual verification in your browser")
         
+        # Optionally save localStorage (Firefox only)
+        if localstorage_output and found_in_browser == 'Firefox' and found_cookiefile:
+            try:
+                profile_dir = os.path.dirname(found_cookiefile)
+                local_storage = extract_firefox_localstorage(profile_dir)
+                with open(localstorage_output, 'w', encoding='utf-8') as f:
+                    json.dump(local_storage, f, indent=2, ensure_ascii=False)
+                if not quiet:
+                    if local_storage:
+                        print(f"{GREEN} LocalStorage saved to: {localstorage_output}")
+                        print(f"{CYAN} LocalStorage origins: {', '.join(local_storage.keys())}")
+                    else:
+                        print(f"{YELLOW} Note: No localStorage entries found for tinder.com or gotinder.com")
+            except Exception as e:
+                print(f"{YELLOW} Warning: Failed to save localStorage: {e}")
+
+        if idb_output and found_in_browser == 'Firefox' and found_cookiefile:
+            try:
+                profile_dir = os.path.dirname(found_cookiefile)
+                idb_data = extract_firefox_indexeddb(profile_dir)
+                with open(idb_output, 'w', encoding='utf-8') as f:
+                    json.dump(idb_data, f, indent=2, ensure_ascii=False)
+                if not quiet:
+                    print(f"{GREEN} IndexedDB dump saved to: {idb_output}")
+                    if idb_data.get("tokens"):
+                        print(f"{CYAN} IndexedDB token keys: {', '.join(idb_data['tokens'].keys())}")
+                    else:
+                        print(f"{YELLOW} Note: No token-like keys found in IndexedDB dump")
+            except Exception as e:
+                print(f"{YELLOW} Warning: Failed to save IndexedDB dump: {e}")
+
         return output_file
     except Exception as e:
         print(f"{RED} Error: Failed to save cookies to {output_file}: {e}")
@@ -443,6 +606,10 @@ def main():
                         help='Preferred browser for cookie extraction (default: try all)')
     parser.add_argument('-o', '--output', default='tinder_cookies.json',
                         help='Output file path for cookies JSON (default: tinder_cookies.json)')
+    parser.add_argument('--localstorage-output', default=None,
+                        help='Output file path for localStorage JSON (Firefox only)')
+    parser.add_argument('--idb-output', default=None,
+                        help='Output file path for IndexedDB token dump (Firefox only)')
     parser.add_argument('--quiet', '-q', action='store_true',
                         help='Suppress verbose output')
     
@@ -451,10 +618,11 @@ def main():
     extract_tinder_cookies(
         browser=args.browser,
         output_file=args.output,
-        quiet=args.quiet
+        quiet=args.quiet,
+        localstorage_output=args.localstorage_output,
+        idb_output=args.idb_output
     )
 
 
 if __name__ == '__main__':
     main()
-

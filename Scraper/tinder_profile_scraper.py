@@ -58,10 +58,25 @@ def load_cookies_from_file(cookie_file):
         return None
 
 
-def inject_cookies_to_session(session, cookies):
+def inject_cookies_to_session(session, cookies, debug_html_dir=None):
     """Inject cookies into the browser session"""
     try:
         browser = session.browser
+        if debug_html_dir:
+            os.makedirs(debug_html_dir, exist_ok=True)
+
+        def save_html(label):
+            if not debug_html_dir:
+                return
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_label = "".join([c if c.isalnum() or c in ['-', '_'] else '_' for c in label])
+            path = os.path.join(debug_html_dir, f"{ts}_{safe_label}.html")
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(browser.page_source or "")
+                print(f"{CYAN} Saved HTML: {path}")
+            except Exception as e:
+                print(f"{YELLOW} Failed to save HTML ({label}): {e}")
         
         # Navigate to Tinder first (required for Selenium cookie injection)
         print(f"{CYAN} Navigating to Tinder to inject cookies...")
@@ -71,6 +86,7 @@ def inject_cookies_to_session(session, cookies):
         # Debug: Check current URL and page title
         print(f"{CYAN} Current URL: {browser.current_url}")
         print(f"{CYAN} Page title: {browser.title[:100] if browser.title else 'None'}")
+        save_html("before_cookie_injection")
         
         # Inject each cookie
         injected_count = 0
@@ -127,6 +143,7 @@ def inject_cookies_to_session(session, cookies):
         page_title = browser.title
         
         print(f"{CYAN} Page title: {page_title}")
+        save_html("after_cookie_injection")
         
         # Check for various Tinder page indicators
         if 'verify' in page_source or 'verification' in page_source or 'puzzle' in page_source or 'captcha' in page_source:
@@ -152,6 +169,7 @@ def inject_cookies_to_session(session, cookies):
             print(f"{YELLOW} Cookies injected but login verification failed")
             print(f"{CYAN} Current URL: {final_url}")
             print(f"{CYAN} Expected URL to contain 'tinder.com/app/' for successful login")
+            save_html("login_verification_failed")
             
             # If not in headless mode, keep browser open longer so user can see what's happening
             if not session.browser.capabilities.get('goog:chromeOptions', {}).get('args', []):
@@ -167,9 +185,119 @@ def inject_cookies_to_session(session, cookies):
         return False
 
 
+def inject_localstorage_to_session(session, localstorage_map, debug_html_dir=None):
+    """Inject localStorage values for specified origins."""
+    try:
+        browser = session.browser
+        for origin, items in (localstorage_map or {}).items():
+            print(f"{CYAN} Injecting localStorage for {origin} ({len(items)} keys)...")
+            browser.get(origin)
+            time.sleep(2)
+            for key, value in items.items():
+                try:
+                    browser.execute_script(
+                        "window.localStorage.setItem(arguments[0], arguments[1]);", key, value
+                    )
+                except Exception:
+                    continue
+
+            if debug_html_dir:
+                try:
+                    os.makedirs(debug_html_dir, exist_ok=True)
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    safe_origin = "".join([c if c.isalnum() or c in ['-', '_'] else '_' for c in origin])
+                    path = os.path.join(debug_html_dir, f"{ts}_localstorage_{safe_origin}.html")
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(browser.page_source or "")
+                    print(f"{CYAN} Saved HTML: {path}")
+                except Exception as e:
+                    print(f"{YELLOW} Failed to save HTML after localStorage inject: {e}")
+
+        # Return to Tinder app
+        browser.get("https://www.tinder.com/app/recs")
+        time.sleep(3)
+        return True
+    except Exception as e:
+        print(f"{YELLOW} Failed to inject localStorage: {e}")
+        return False
+
+
+def inject_tokens_to_localstorage(session, tokens, debug_html_dir=None):
+    """Inject token-like entries into localStorage and refresh."""
+    try:
+        if not tokens:
+            return False
+
+        browser = session.browser
+        browser.get("https://tinder.com")
+        time.sleep(2)
+
+        for key, value in tokens.items():
+            try:
+                browser.execute_script(
+                    "window.localStorage.setItem(arguments[0], arguments[1]);", key, value
+                )
+            except Exception:
+                continue
+
+        if debug_html_dir:
+            try:
+                os.makedirs(debug_html_dir, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = os.path.join(debug_html_dir, f"{ts}_tokens_localstorage.html")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(browser.page_source or "")
+                print(f"{CYAN} Saved HTML: {path}")
+            except Exception as e:
+                print(f"{YELLOW} Failed to save HTML after token inject: {e}")
+
+        browser.get("https://www.tinder.com/app/recs")
+        time.sleep(3)
+        return True
+    except Exception as e:
+        print(f"{YELLOW} Failed to inject tokens into localStorage: {e}")
+        return False
+
+
+def save_session_artifacts(session, cookies_output=None, localstorage_output=None):
+    """Save cookies and localStorage from current browser session."""
+    try:
+        if cookies_output:
+            cookies = session.browser.get_cookies()
+            with open(cookies_output, 'w', encoding='utf-8') as f:
+                json.dump(cookies, f, indent=2, ensure_ascii=False)
+            print(f"{GREEN} Saved session cookies to: {cookies_output}")
+
+        if localstorage_output:
+            try:
+                session.browser.get("https://tinder.com")
+                time.sleep(2)
+                storage = session.browser.execute_script(
+                    "var items = {}; "
+                    "for (var i = 0; i < localStorage.length; i++) { "
+                    "  var key = localStorage.key(i); "
+                    "  items[key] = localStorage.getItem(key); "
+                    "} "
+                    "return items;"
+                )
+            except Exception:
+                storage = {}
+
+            with open(localstorage_output, 'w', encoding='utf-8') as f:
+                json.dump({"https://tinder.com": storage}, f, indent=2, ensure_ascii=False)
+            print(f"{GREEN} Saved session localStorage to: {localstorage_output}")
+    except Exception as e:
+        print(f"{YELLOW} Failed to save session artifacts: {e}")
+
+
 def scrape_profile(email: str = None, password: str = None, login_method: str = 'facebook', 
                    cookie_file: str = None, output_format: str = 'json', output_file: str = None, 
-                   headless: bool = True):
+                   headless: bool = True, limit: int = 1, delay: float = 1.5,
+                   swipe: str = None, no_swipe: bool = False,
+                   location: str = None, distance_km: float = None, keep_browser_open: bool = False,
+                   debug_html_dir: str = None, localstorage_file: str = None,
+                   idb_file: str = None, manual_login: bool = False,
+                   session_output: str = None, localstorage_output: str = None):
     """
     Scrape the first visible Tinder profile without swiping
     
@@ -188,15 +316,72 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
         # Create session (headless mode if requested)
         session = Session(headless=headless, store_session=True)
         
-        # Try cookie-based authentication first (recommended)
         logged_in = False
+
+        # Manual login flow (one-time handoff)
+        if manual_login:
+            print(f"{CYAN} Manual login mode enabled.")
+            print(f"{YELLOW} Please log into Tinder in the opened browser window.")
+            print(f"{YELLOW} Waiting for login to complete (URL should be tinder.com/app/...)")
+            max_wait_seconds = 300
+            waited = 0
+            while waited < max_wait_seconds:
+                if session._is_logged_in():
+                    print(f"{GREEN} Login detected!")
+                    break
+                time.sleep(2)
+                waited += 2
+
+            if not session._is_logged_in():
+                print(f"{RED} Login not detected within {max_wait_seconds}s.")
+                print(f"{YELLOW} Try again or use email/password fallback.")
+                sys.exit(1)
+
+            save_session_artifacts(
+                session, cookies_output=session_output, localstorage_output=localstorage_output
+            )
+            logged_in = True
+
+        # Try cookie-based authentication first (recommended)
         if cookie_file:
             print(f"{CYAN} Attempting cookie-based authentication...")
             cookies = load_cookies_from_file(cookie_file)
             if cookies:
-                logged_in = inject_cookies_to_session(session, cookies)
+                logged_in = inject_cookies_to_session(session, cookies, debug_html_dir=debug_html_dir)
                 if logged_in:
                     print(f"{GREEN} Authentication successful via cookies")
+
+        # Try localStorage injection if provided and not logged in
+        if not logged_in and localstorage_file:
+            try:
+                with open(localstorage_file, 'r', encoding='utf-8') as f:
+                    localstorage_map = json.load(f)
+                if isinstance(localstorage_map, dict) and localstorage_map:
+                    injected = inject_localstorage_to_session(
+                        session, localstorage_map, debug_html_dir=debug_html_dir
+                    )
+                    if injected and session._is_logged_in():
+                        logged_in = True
+                        print(f"{GREEN} Authentication successful via localStorage!")
+            except Exception as e:
+                print(f"{YELLOW} Failed to load localStorage file: {e}")
+
+        # Try IndexedDB token dump injection if provided
+        if not logged_in and idb_file:
+            try:
+                with open(idb_file, 'r', encoding='utf-8') as f:
+                    idb_map = json.load(f)
+                tokens = idb_map.get('tokens') if isinstance(idb_map, dict) else None
+                if isinstance(tokens, dict) and tokens:
+                    print(f"{CYAN} Injecting {len(tokens)} token(s) from IndexedDB dump...")
+                    injected = inject_tokens_to_localstorage(
+                        session, tokens, debug_html_dir=debug_html_dir
+                    )
+                    if injected and session._is_logged_in():
+                        logged_in = True
+                        print(f"{GREEN} Authentication successful via IndexedDB tokens!")
+            except Exception as e:
+                print(f"{YELLOW} Failed to load IndexedDB file: {e}")
         
         # Fall back to email/password login if cookies failed or not provided
         if not logged_in:
@@ -224,77 +409,172 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
                     print(f"{YELLOW}  3. Ensure you have an active TinderBotz session")
                     sys.exit(1)
         
-        # Get the first visible profile (without swiping)
-        print(f"{CYAN} Extracting first visible profile...")
-        print(f"{YELLOW} Note: This will NOT swipe - only view the current profile")
-        
-        geomatch = session.get_geomatch(quickload=False)
-        
-        if not geomatch or not geomatch.get_name():
+        # Optional location and distance settings
+        if location:
+            try:
+                parts = [p.strip() for p in location.split(',')]
+                if len(parts) == 2:
+                    lat = float(parts[0])
+                    lng = float(parts[1])
+                    print(f"{CYAN} Setting custom location: {lat}, {lng}")
+                    session.set_custom_location(lat, lng)
+                else:
+                    print(f"{YELLOW} Invalid --location format. Use \"lat,lng\" (e.g., 47.6062,-122.3321)")
+            except Exception as e:
+                print(f"{YELLOW} Failed to set custom location: {e}")
+
+        if distance_km is not None:
+            try:
+                print(f"{CYAN} Setting distance range: {distance_km} km")
+                session.set_distance_range(distance_km)
+            except Exception as e:
+                print(f"{YELLOW} Failed to set distance range: {e}")
+
+        # Multi-profile loop
+        profile_list = []
+        total = max(1, int(limit))
+
+        if total > 1 and no_swipe:
+            print(f"{YELLOW} --no-swipe set with --limit > 1. Only the first profile will be captured.")
+            total = 1
+
+        if total == 1:
+            print(f"{CYAN} Extracting first visible profile...")
+            print(f"{YELLOW} Note: This will NOT swipe - only view the current profile")
+        else:
+            swipe_label = swipe or 'like'
+            print(f"{CYAN} Extracting up to {total} profiles...")
+            print(f"{YELLOW} Swipe mode: {swipe_label} (delay: {delay}s)")
+
+        for i in range(total):
+            geomatch = session.get_geomatch(quickload=False)
+            if not geomatch or not geomatch.get_name():
+                print(f"{YELLOW} No profile found or failed to extract profile data")
+                break
+
+            profile_data = geomatch.get_dictionary() or {}
+            profile_data["id"] = geomatch.get_id()
+            profile_data["extracted_at"] = datetime.now().isoformat()
+
+            profile_list.append(profile_data)
+            print(f"{GREEN} [{i+1}/{total}] Profile extracted: {profile_data['name']} ({profile_data['age']})")
+            print(f"{CYAN} Bio: {profile_data['bio'][:100] if profile_data['bio'] else 'N/A'}...")
+            print(f"{CYAN} Images: {len(profile_data['image_urls'])}")
+            if debug_html_dir:
+                try:
+                    os.makedirs(debug_html_dir, exist_ok=True)
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    safe_name = "".join([c if c.isalnum() or c in ['-', '_'] else '_' for c in profile_data.get('name','profile')])
+                    path = os.path.join(debug_html_dir, f"{ts}_profile_{i+1}_{safe_name}.html")
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(session.browser.page_source or "")
+                    print(f"{CYAN} Saved HTML: {path}")
+                except Exception as e:
+                    print(f"{YELLOW} Failed to save profile HTML: {e}")
+
+            if i < total - 1:
+                if no_swipe:
+                    print(f"{YELLOW} No-swipe mode enabled. Stopping after first profile.")
+                    break
+
+                if swipe is None:
+                    swipe = 'like'
+
+                if swipe == 'like':
+                    session.like(amount=1, sleep=delay, randomize_sleep=False)
+                elif swipe == 'dislike':
+                    session.dislike(amount=1)
+                    time.sleep(delay)
+                elif swipe == 'superlike':
+                    session.superlike(amount=1)
+                    time.sleep(delay)
+                else:
+                    print(f"{YELLOW} Unknown swipe mode: {swipe}. Stopping.")
+                    break
+
+        if len(profile_list) == 0:
             print(f"{RED} Error: Could not extract profile data")
             print(f"{YELLOW} Make sure you are logged in and there is a profile visible")
             sys.exit(1)
-        
-        # Extract profile data
-        profile_data = {
-            "id": geomatch.get_id(),
-            "name": geomatch.get_name(),
-            "age": geomatch.get_age(),
-            "bio": geomatch.get_bio(),
-            "work": geomatch.get_work(),
-            "study": geomatch.get_study(),
-            "home": geomatch.get_home(),
-            "gender": geomatch.get_gender(),
-            "distance": geomatch.get_distance(),
-            "passions": geomatch.get_passions(),
-            "lifestyle": geomatch.get_lifestyle(),
-            "basics": geomatch.get_basics(),
-            "anthem": geomatch.get_anthem(),
-            "looking_for": geomatch.get_looking_for(),
-            "instagram": geomatch.get_instagram(),
-            "image_urls": geomatch.get_image_urls(),
-            "extracted_at": datetime.now().isoformat(),
-        }
-        
-        print(f"{GREEN} Profile extracted: {profile_data['name']} ({profile_data['age']})")
-        print(f"{CYAN} Bio: {profile_data['bio'][:100] if profile_data['bio'] else 'N/A'}...")
-        print(f"{CYAN} Images: {len(profile_data['image_urls'])}")
-        
+
         # Save output
         if not output_file:
-            output_file = f"tinder_profile_{profile_data['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{output_format}"
-        
+            if len(profile_list) == 1:
+                profile_name = profile_list[0]['name'].replace(' ', '_') if profile_list[0].get('name') else 'profile'
+                output_file = f"tinder_profile_{profile_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{output_format}"
+            else:
+                output_file = f"tinder_profiles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{output_format}"
+
         if output_format == 'json':
             with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(profile_data, f, indent=2, ensure_ascii=False)
+                if len(profile_list) == 1:
+                    json.dump(profile_list[0], f, indent=2, ensure_ascii=False)
+                else:
+                    json.dump(profile_list, f, indent=2, ensure_ascii=False)
         else:  # CSV
             with open(output_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                # Write header
-                writer.writerow(['Field', 'Value'])
-                writer.writerow(['ID', profile_data.get('id', '')])
-                writer.writerow(['Name', profile_data.get('name', '')])
-                writer.writerow(['Age', profile_data.get('age', '')])
-                writer.writerow(['Bio', profile_data.get('bio', '')])
-                writer.writerow(['Work', profile_data.get('work', '')])
-                writer.writerow(['Study', profile_data.get('study', '')])
-                writer.writerow(['Home', profile_data.get('home', '')])
-                writer.writerow(['Gender', profile_data.get('gender', '')])
-                writer.writerow(['Distance', profile_data.get('distance', '')])
-                writer.writerow(['Instagram', profile_data.get('instagram', '')])
-                writer.writerow(['Passions', ', '.join(profile_data.get('passions', [])) if profile_data.get('passions') else ''])
-                writer.writerow(['Lifestyle', ', '.join(profile_data.get('lifestyle', [])) if profile_data.get('lifestyle') else ''])
-                writer.writerow(['Basics', ', '.join(profile_data.get('basics', [])) if profile_data.get('basics') else ''])
-                writer.writerow(['Anthem', profile_data.get('anthem', '')])
-                writer.writerow(['Looking For', profile_data.get('looking_for', '')])
-                writer.writerow(['Image URLs', '; '.join(profile_data.get('image_urls', []))])
-                writer.writerow(['Extracted At', profile_data.get('extracted_at', '')])
-        
+                if len(profile_list) == 1:
+                    profile_data = profile_list[0]
+                    writer.writerow(['Field', 'Value'])
+                    writer.writerow(['ID', profile_data.get('id', '')])
+                    writer.writerow(['Name', profile_data.get('name', '')])
+                    writer.writerow(['Age', profile_data.get('age', '')])
+                    writer.writerow(['Bio', profile_data.get('bio', '')])
+                    writer.writerow(['Work', profile_data.get('work', '')])
+                    writer.writerow(['Study', profile_data.get('study', '')])
+                    writer.writerow(['Home', profile_data.get('home', '')])
+                    writer.writerow(['Gender', profile_data.get('gender', '')])
+                    writer.writerow(['Distance', profile_data.get('distance', '')])
+                    writer.writerow(['Instagram', profile_data.get('instagram', '')])
+                    writer.writerow(['Passions', ', '.join(profile_data.get('passions', [])) if profile_data.get('passions') else ''])
+                    writer.writerow(['Lifestyle', ', '.join(profile_data.get('lifestyle', [])) if profile_data.get('lifestyle') else ''])
+                    writer.writerow(['Basics', ', '.join(profile_data.get('basics', [])) if profile_data.get('basics') else ''])
+                    writer.writerow(['Anthem', profile_data.get('anthem', '')])
+                    writer.writerow(['Looking For', profile_data.get('looking_for', '')])
+                    writer.writerow(['Image URLs', '; '.join(profile_data.get('image_urls', []))])
+                    writer.writerow(['Extracted At', profile_data.get('extracted_at', '')])
+                else:
+                    writer.writerow([
+                        'id', 'name', 'age', 'bio', 'work', 'study', 'home', 'gender',
+                        'distance', 'passions', 'lifestyle', 'basics', 'anthem', 'looking_for',
+                        'instagram', 'image_urls', 'extracted_at'
+                    ])
+                    for profile_data in profile_list:
+                        writer.writerow([
+                            profile_data.get('id', ''),
+                            profile_data.get('name', ''),
+                            profile_data.get('age', ''),
+                            profile_data.get('bio', ''),
+                            profile_data.get('work', ''),
+                            profile_data.get('study', ''),
+                            profile_data.get('home', ''),
+                            profile_data.get('gender', ''),
+                            profile_data.get('distance', ''),
+                            ', '.join(profile_data.get('passions', []) or []),
+                            ', '.join(profile_data.get('lifestyle', []) or []),
+                            ', '.join(profile_data.get('basics', []) or []),
+                            profile_data.get('anthem', ''),
+                            profile_data.get('looking_for', ''),
+                            profile_data.get('instagram', ''),
+                            '; '.join(profile_data.get('image_urls', []) or []),
+                            profile_data.get('extracted_at', '')
+                        ])
+
         print(f"{GREEN} Data saved to: {output_file}")
-        print(f"{YELLOW} Note: Profile was viewed but NOT swiped (left or right)")
-        
-        # Close browser
-        session.browser.quit()
+        if len(profile_list) == 1:
+            print(f"{YELLOW} Note: Profile was viewed but NOT swiped (left or right)")
+
+        # Close browser unless user wants it open
+        if keep_browser_open:
+            print(f"{YELLOW} Keeping browser open (debug mode). Press Ctrl+C to exit.")
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                pass
+        else:
+            session.browser.quit()
         
     except KeyboardInterrupt:
         print(f"\n{YELLOW} Interrupted by user")
@@ -321,6 +601,32 @@ def main():
                         help='Run browser in headless mode (default: True - recommended for automation)')
     parser.add_argument('--no-headless', action='store_true', dest='no_headless',
                         help='Disable headless mode (show browser window) - overrides --headless')
+    parser.add_argument('--limit', type=int, default=1,
+                        help='Maximum number of profiles to extract (default: 1)')
+    parser.add_argument('--delay', type=float, default=1.5,
+                        help='Delay between swipes in seconds (default: 1.5)')
+    parser.add_argument('--swipe', choices=['like', 'dislike', 'superlike'], default=None,
+                        help='Swipe action between profiles (default: like when limit > 1)')
+    parser.add_argument('--no-swipe', action='store_true',
+                        help='Extract profile data without swiping (single profile only)')
+    parser.add_argument('--location',
+                        help='Set custom location as "lat,lng" (e.g., 47.6062,-122.3321)')
+    parser.add_argument('--distance-km', type=float,
+                        help='Set distance range in kilometers (requires location permission)')
+    parser.add_argument('--keep-browser-open', action='store_true',
+                        help='Keep browser open after scraping completes')
+    parser.add_argument('--debug-html-dir',
+                        help='Save page HTML snapshots to this directory for debugging')
+    parser.add_argument('--localstorage',
+                        help='Path to localStorage JSON file to inject (optional)')
+    parser.add_argument('--idb',
+                        help='Path to IndexedDB token dump JSON file (optional)')
+    parser.add_argument('--manual-login', action='store_true',
+                        help='Open browser for manual login and save session artifacts')
+    parser.add_argument('--session-output',
+                        help='Output file path for session cookies (manual login)')
+    parser.add_argument('--localstorage-output',
+                        help='Output file path for localStorage JSON (manual login)')
     
     args = parser.parse_args()
     
@@ -342,10 +648,22 @@ def main():
         cookie_file=args.cookie_file,
         output_format=args.format,
         output_file=args.output,
-        headless=headless_mode
+        headless=headless_mode,
+        limit=args.limit,
+        delay=args.delay,
+        swipe=args.swipe,
+        no_swipe=args.no_swipe,
+        location=args.location,
+        distance_km=args.distance_km,
+        keep_browser_open=args.keep_browser_open,
+        debug_html_dir=args.debug_html_dir,
+        localstorage_file=args.localstorage,
+        idb_file=args.idb,
+        manual_login=args.manual_login,
+        session_output=args.session_output,
+        localstorage_output=args.localstorage_output
     )
 
 
 if __name__ == '__main__':
     main()
-
