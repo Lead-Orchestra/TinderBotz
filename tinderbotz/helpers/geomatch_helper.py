@@ -974,10 +974,11 @@ class GeomatchHelper:
                             const label = textOf(li.querySelector('h3'));
                             const value = textOf(li.querySelector('div[class*="Typs(body-1-regular)"]'));
                             if (label && value) {
-                                out.lifestyle.push(`${label}: ${value}`);
+                                const entry = `${label}: ${value}`;
+                                if (!out.lifestyle.includes(entry)) out.lifestyle.push(entry);
                             } else {
                                 const fallback = textOf(li);
-                                if (fallback) out.lifestyle.push(fallback);
+                                if (fallback && !out.lifestyle.includes(fallback)) out.lifestyle.push(fallback);
                             }
                         }
                     } else if (title === 'more about me') {
@@ -986,10 +987,11 @@ class GeomatchHelper:
                             const label = textOf(li.querySelector('h3'));
                             const value = textOf(li.querySelector('div[class*="Typs(body-1-regular)"]'));
                             if (label && value) {
-                                out.more_about.push(`${label}: ${value}`);
+                                const entry = `${label}: ${value}`;
+                                if (!out.more_about.includes(entry)) out.more_about.push(entry);
                             } else {
                                 const fallback = textOf(li);
-                                if (fallback) out.more_about.push(fallback);
+                                if (fallback && !out.more_about.includes(fallback)) out.more_about.push(fallback);
                             }
                         }
                     } else if (title === 'essentials') {
@@ -999,10 +1001,25 @@ class GeomatchHelper:
                             if (value) out.essentials.push(value);
                         }
                     } else {
-                        const answerEl = container.querySelector('div[class*="Typs(display-2-strong)"], span[class*="Typs(display-2-strong)"]');
-                        const answer = textOf(answerEl);
-                        if (answer) {
-                            out.prompts.push({ question: textOf(h2), answer });
+                        const promptItems = Array.from(container.querySelectorAll('li'));
+                        if (promptItems.length > 0) {
+                            for (const li of promptItems) {
+                                const q = textOf(li.querySelector('h3')) || textOf(h2);
+                                const strongAnswer = textOf(li.querySelector('div[class*="Typs(display-2-strong)"], span[class*="Typs(display-2-strong)"]'));
+                                const emoji = textOf(li.querySelector('div[class*="Typs(display-3-strong)"], span[class*="Typs(display-3-strong)"]'));
+                                const textAnswer = textOf(li.querySelector('div[class*="Typs(body-1-strong)"], span[class*="Typs(body-1-strong)"]'));
+                                const answer = strongAnswer || [emoji, textAnswer].filter(Boolean).join(' ').trim();
+                                if (q && answer) {
+                                    out.prompts.push({ question: q, answer });
+                                }
+                            }
+                        } else {
+                            const answerEl = container.querySelector('div[class*="Typs(display-2-strong)"], span[class*="Typs(display-2-strong)"]')
+                                || container.querySelector('div[class*="Typs(display-3-strong)"], span[class*="Typs(display-3-strong)"]');
+                            const answer = textOf(answerEl);
+                            if (answer) {
+                                out.prompts.push({ question: textOf(h2), answer });
+                            }
                         }
                     }
                 }
