@@ -251,6 +251,13 @@ class GeomatchHelper:
 
     def _get_profile_scope(self, open_if_needed=False):
         active_name = None
+        # Prefer the expanded profile content container when available
+        try:
+            content = self.browser.find_elements(By.CSS_SELECTOR, "div.profileContent")
+            if content:
+                return content[0], active_name
+        except Exception:
+            pass
         try:
             card = self._get_active_card()
             if card:
@@ -371,16 +378,31 @@ class GeomatchHelper:
         return socials
 
     def get_name(self):
-        try:
-            card = self._get_active_card()
-            if card:
-                name_el = card.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
-                if name_el and name_el[0].text:
-                    candidate = name_el[0].text.strip()
-                    if self._is_valid_name(candidate):
-                        return candidate
-        except Exception:
-            pass
+        if self._is_profile_opened():
+            try:
+                scope, _ = self._get_profile_scope(open_if_needed=True)
+                if scope:
+                    name_text = self.browser.execute_script(
+                        """
+                        const root = arguments[0];
+                        const span = root.querySelector('h1 span[class*="Pend"]');
+                        if (span && span.textContent) return span.textContent.trim();
+                        const h1 = root.querySelector('h1[aria-label]');
+                        if (h1) {
+                            const label = h1.getAttribute('aria-label') || '';
+                            const match = label.match(/^([^0-9]+?)\\s*(\\d|years|year)/i);
+                            if (match && match[1]) return match[1].trim();
+                        }
+                        const h1b = root.querySelector('h1');
+                        if (h1b && h1b.textContent) return h1b.textContent.trim().split('\\n')[0];
+                        return null;
+                        """,
+                        scope
+                    )
+                    if name_text and self._is_valid_name(name_text):
+                        return name_text
+            except Exception:
+                pass
 
         if not self._is_profile_opened():
             self._open_profile()
@@ -402,6 +424,18 @@ class GeomatchHelper:
             if self._is_valid_name(name):
                 return name
         except Exception as e:
+            pass
+
+        # Fallback: active card name (only if modal lookup failed)
+        try:
+            card = self._get_active_card()
+            if card:
+                name_el = card.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
+                if name_el and name_el[0].text:
+                    candidate = name_el[0].text.strip()
+                    if self._is_valid_name(candidate):
+                        return candidate
+        except Exception:
             pass
 
         # Fallback: parse from aria-label on carousel
@@ -612,6 +646,16 @@ class GeomatchHelper:
                     if not item:
                         continue
                     lower = item.lower()
+                    if "verified" in lower:
+                        rowdata["verified"] = True
+                        continue
+                    height_match = re.search(r'(\\d{2,3})\\s*cm', lower)
+                    if height_match and not rowdata.get('height_cm'):
+                        try:
+                            rowdata['height_cm'] = int(height_match.group(1))
+                        except ValueError:
+                            pass
+                        continue
                     if not rowdata.get('home') and lower.startswith("lives in "):
                         rowdata['home'] = item[len("lives in "):].strip()
                         continue
@@ -632,6 +676,10 @@ class GeomatchHelper:
                             "pansexual", "queer", "asexual"
                         ]:
                             rowdata['gender'] = item
+                            continue
+                    if not rowdata.get('study'):
+                        if ("student at " in lower) or ("at uni" in lower) or ("university" in lower) or ("college" in lower) or ("school" in lower):
+                            rowdata['study'] = item
                             continue
                     if not rowdata.get('work'):
                         if not re.search(r'\\d', item) and len(item.split()) <= 4:
@@ -759,6 +807,7 @@ class GeomatchHelper:
     def get_bio_and_passions(self):
         bio = None
         looking_for = None
+        prompts = []
 
         infoItems = {
             "passions": [],
@@ -819,7 +868,7 @@ class GeomatchHelper:
             spark = self.browser.execute_script(
                 """
                 const root = arguments[0];
-                const out = { about: null, looking_for: null, interests: [], lifestyle: [], more_about: [], essentials: [], looking_for_tags: [] };
+                const out = { about: null, looking_for: null, interests: [], lifestyle: [], more_about: [], essentials: [], looking_for_tags: [], prompts: [] };
                 if (!root) return out;
                 const norm = (s) => (s || '').toLowerCase().replace(/\\s+/g, ' ').trim();
                 const textOf = (el) => (el && (el.textContent || '').trim()) || '';
@@ -873,6 +922,12 @@ class GeomatchHelper:
                             const value = textOf(li.querySelector('div[class*="Typs(body-1-regular)"]')) || textOf(li);
                             if (value) out.essentials.push(value);
                         }
+                    } else {
+                        const answerEl = section.querySelector('div[class*="Typs(display-2-strong)"]');
+                        const answer = textOf(answerEl);
+                        if (answer) {
+                            out.prompts.push({ question: textOf(h2), answer });
+                        }
                     }
                 }
 
@@ -900,6 +955,8 @@ class GeomatchHelper:
                     for item in spark.get("essentials") or []:
                         if item and item not in infoItems["basics"]:
                             infoItems["basics"].append(item)
+                if spark.get("prompts"):
+                    prompts = spark.get("prompts") or []
         except Exception:
             pass
 
@@ -994,7 +1051,7 @@ class GeomatchHelper:
         except Exception as e:
             pass
 
-        return bio, infoItems["passions"], infoItems["lifestyle"], infoItems["basics"], anthem, looking_for
+        return bio, infoItems["passions"], infoItems["lifestyle"], infoItems["basics"], anthem, looking_for, prompts
 
     def get_image_urls(self, quickload=True):
         image_urls = []
@@ -1012,36 +1069,37 @@ class GeomatchHelper:
                     image_urls.append(url)
 
         # Prefer images from the active card on the recs page
-        try:
-            card = self._get_active_card()
-            active_name = None
+        if not self._is_profile_opened():
             try:
+                card = self._get_active_card()
+                active_name = None
+                try:
+                    if card:
+                        name_el = card.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
+                        if name_el and name_el[0].text:
+                            active_name = name_el[0].text.strip()
+                    if active_name:
+                        name_candidates = self.browser.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
+                        for cand in name_candidates:
+                            if (cand.text or "").strip() == active_name:
+                                try:
+                                    card = cand.find_element(By.XPATH, "./ancestor::div[@data-keyboard-gamepad='true'][1]")
+                                except Exception:
+                                    pass
+                                break
+                except Exception:
+                    pass
+
                 if card:
-                    name_el = card.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
-                    if name_el and name_el[0].text:
-                        active_name = name_el[0].text.strip()
-                if active_name:
-                    name_candidates = self.browser.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
-                    for cand in name_candidates:
-                        if (cand.text or "").strip() == active_name:
-                            try:
-                                card = cand.find_element(By.XPATH, "./ancestor::div[@data-keyboard-gamepad='true'][1]")
-                            except Exception:
-                                pass
-                            break
+                    elements = card.find_elements(By.CSS_SELECTOR, "div[aria-label^='Profile photo'][style*='background-image']")
+                    for element in elements:
+                        style = element.value_of_css_property('background-image')
+                        if style and 'url(' in style:
+                            parts = style.split('\"')
+                            if len(parts) > 1:
+                                add_url(parts[1])
             except Exception:
                 pass
-
-            if card:
-                elements = card.find_elements(By.CSS_SELECTOR, "div[aria-label^='Profile photo'][style*='background-image']")
-                for element in elements:
-                    style = element.value_of_css_property('background-image')
-                    if style and 'url(' in style:
-                        parts = style.split('\"')
-                        if len(parts) > 1:
-                            add_url(parts[1])
-        except Exception:
-            pass
 
         if image_urls:
             return image_urls
@@ -1050,6 +1108,25 @@ class GeomatchHelper:
             self._open_profile()
 
         scope, _ = self._get_profile_scope(open_if_needed=True)
+
+        # Click through photo tabs to load all images (Sparks carousel)
+        try:
+            buttons = scope.find_elements(By.CSS_SELECTOR, "[role='tablist'] button[aria-controls]")
+            for btn in buttons:
+                try:
+                    btn.click()
+                    time.sleep(0.2)
+                    slides = scope.find_elements(By.CSS_SELECTOR, "[role='tabpanel'][aria-hidden='false'] div[style*='background-image']")
+                    for slide in slides:
+                        style = slide.value_of_css_property('background-image')
+                        if style and 'url(' in style:
+                            parts = style.split('\"')
+                            if len(parts) > 1:
+                                add_url(parts[1])
+                except Exception:
+                    continue
+        except Exception:
+            pass
 
         # Primary selector (legacy) scoped
         try:

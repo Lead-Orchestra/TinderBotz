@@ -2,7 +2,7 @@ from tinderbotz.helpers.storage_helper import StorageHelper
 
 class Geomatch:
 
-    def __init__(self, name, age, work, study, home, gender, bio, lifestyle, basics, anthem, looking_for = None, distance = None, passions = None, image_urls = None, instagram = None, socials = None, verified = None, recently_active = None):
+    def __init__(self, name, age, work, study, home, gender, bio, lifestyle, basics, anthem, looking_for = None, distance = None, passions = None, image_urls = None, instagram = None, socials = None, verified = None, recently_active = None, height_cm = None, prompts = None):
         self.name = name
         self.age = age
         self.work = work
@@ -21,6 +21,8 @@ class Geomatch:
         self.socials = socials or {}
         self.verified = verified
         self.recently_active = recently_active
+        self.height_cm = height_cm
+        self.prompts = prompts or []
 
         # create a unique id for this person
         self.id = "{}{}_{}".format(name, age, StorageHelper.id_generator(size=4))
@@ -99,6 +101,12 @@ class Geomatch:
     def get_recently_active(self):
         return self.recently_active
 
+    def get_height_cm(self):
+        return self.height_cm
+
+    def get_prompts(self):
+        return self.prompts
+
     def get_id(self):
         return self.id
 
@@ -123,5 +131,7 @@ class Geomatch:
             "socials": self.get_socials(),
             "verified": self.get_verified(),
             "recently_active": self.get_recently_active(),
+            "height_cm": self.get_height_cm(),
+            "prompts": self.get_prompts(),
         }
         return data
