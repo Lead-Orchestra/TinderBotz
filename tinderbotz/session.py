@@ -302,6 +302,7 @@ class Session:
             helper = GeomatchHelper(browser=self.browser)
             self._handle_potential_popups()
 
+            helper.wait_for_profile_ready()
             name = None
             attempts = 0
             max_attempts = 3

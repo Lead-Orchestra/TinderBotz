@@ -198,6 +198,57 @@ class GeomatchHelper:
             return None
         return None
 
+    def _is_valid_name(self, name):
+        if not name:
+            return False
+        value = name.strip()
+        if len(value) < 2:
+            return False
+        lower = value.lower()
+        if any(bad in lower for bad in [
+            "rewind", "super like", "superlike", "boost", "upgrade",
+            "passport", "tinder", "like", "nope", "report", "block"
+        ]):
+            return False
+        if any(char.isdigit() for char in value):
+            return False
+        return True
+
+    def _expand_profile_sections(self, scope=None):
+        try:
+            clicked = self.browser.execute_script(
+                """
+                const root = arguments[0] || document;
+                const buttons = Array.from(root.querySelectorAll('button,[role="button"]'))
+                    .filter(el => /view all/i.test(el.textContent || ''));
+                const expanders = Array.from(root.querySelectorAll('[role="button"][aria-expanded="false"]'));
+                const toClick = [...new Set([...buttons, ...expanders])];
+                toClick.forEach(el => {
+                    try { el.click(); } catch (e) {}
+                });
+                return toClick.length;
+                """,
+                scope
+            )
+            if clicked:
+                time.sleep(0.3)
+        except Exception:
+            pass
+
+    def wait_for_profile_ready(self, timeout=12):
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                if not self._is_profile_opened():
+                    self._open_profile()
+                name = self.get_name()
+                if self._is_valid_name(name):
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.5)
+        return False
+
     def _get_profile_scope(self, open_if_needed=False):
         active_name = None
         try:
@@ -325,7 +376,9 @@ class GeomatchHelper:
             if card:
                 name_el = card.find_elements(By.CSS_SELECTOR, "[itemprop='name']")
                 if name_el and name_el[0].text:
-                    return name_el[0].text.strip()
+                    candidate = name_el[0].text.strip()
+                    if self._is_valid_name(candidate):
+                        return candidate
         except Exception:
             pass
 
@@ -346,7 +399,8 @@ class GeomatchHelper:
                 element2 = self.browser.find_element(By.XPATH, xpath2)
                 name = element2.text
 
-            return name
+            if self._is_valid_name(name):
+                return name
         except Exception as e:
             pass
 
@@ -358,7 +412,9 @@ class GeomatchHelper:
                 if label:
                     normalized = label.replace("’", "'")
                     if "'s photos" in normalized:
-                        return normalized.split("'s photos")[0].strip()
+                        candidate = normalized.split("'s photos")[0].strip()
+                        if self._is_valid_name(candidate):
+                            return candidate
         except Exception:
             pass
 
@@ -371,7 +427,9 @@ class GeomatchHelper:
                 # Try to find a name at the start of the text
                 first_line = text.strip().split("\n")[0]
                 if first_line:
-                    return first_line.split(",")[0].strip()
+                    candidate = first_line.split(",")[0].strip()
+                    if self._is_valid_name(candidate):
+                        return candidate
         except Exception:
             pass
 
@@ -629,6 +687,7 @@ class GeomatchHelper:
             return rowdata
 
         scope, _ = self._get_profile_scope(open_if_needed=True)
+        self._expand_profile_sections(scope)
 
         xpath = './/div[contains(@class,"Row")]'
         rows = scope.find_elements(By.XPATH, xpath)
