@@ -464,6 +464,22 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
                     with open(path, "w", encoding="utf-8") as f:
                         f.write(session.browser.page_source or "")
                     print(f"{CYAN} HTML snapshot saved: {path}")
+                    try:
+                        profile_html = session.browser.execute_script(
+                            "const root = document.querySelector('.profileContent') || "
+                            "document.querySelector('div[role=\"dialog\"], div[aria-modal=\"true\"]') || "
+                            "document.querySelector(\"div[data-keyboard-gamepad='true'][aria-hidden='false']\");"
+                            "return root ? root.outerHTML : '';"
+                        )
+                        if profile_html:
+                            profile_path = os.path.join(debug_html_dir, f"{ts}_profile_dom_{i+1}_{safe_name}.html")
+                            with open(profile_path, "w", encoding="utf-8") as f:
+                                f.write(profile_html)
+                            print(f"{CYAN} Profile DOM snapshot saved: {profile_path}")
+                        else:
+                            print(f"{YELLOW} Profile DOM snapshot not found for {safe_name}")
+                    except Exception as e:
+                        print(f"{YELLOW} Failed to save profile DOM snapshot: {e}")
                 except Exception as e:
                     print(f"{YELLOW} Failed to save HTML snapshot: {e}")
 
