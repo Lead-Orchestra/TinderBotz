@@ -449,6 +449,28 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
             print(f"{CYAN} Extracting up to {total} profiles...")
             print(f"{YELLOW} Swipe mode: {swipe_label} (delay: {delay}s)")
 
+        def wait_for_profile_dom(browser, timeout=12):
+            end = time.time() + timeout
+            while time.time() < end:
+                try:
+                    data = browser.execute_script(
+                        "const root = document.querySelector('.profileContent') || "
+                        "document.querySelector('div[role=\"dialog\"], div[aria-modal=\"true\"]') || "
+                        "document.querySelector(\"div[data-keyboard-gamepad='true'][aria-hidden='false']\");"
+                        "if (!root) return {ready:false,count:0};"
+                        "const h2s = Array.from(root.querySelectorAll('h2'));"
+                        "const norm = (s)=> (s||'').toLowerCase().replace(/\\s+/g,' ').trim();"
+                        "const hasLooking = h2s.some(h=> norm(h.textContent).includes('looking for'));"
+                        "const hasEssentials = h2s.some(h=> norm(h.textContent)==='essentials');"
+                        "return {ready: (h2s.length>0) && (hasLooking || hasEssentials), count: h2s.length};"
+                    )
+                    if data and isinstance(data, dict) and data.get("ready"):
+                        return True
+                except Exception:
+                    pass
+                time.sleep(0.5)
+            return False
+
         for i in range(total):
             geomatch = session.get_geomatch(quickload=False)
             if not geomatch or not geomatch.get_name():
@@ -458,6 +480,21 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
             if debug_html_dir:
                 try:
                     os.makedirs(debug_html_dir, exist_ok=True)
+                    try:
+                        session.browser.execute_script(
+                            "const root = document.querySelector('.profileContent') || "
+                            "document.querySelector('div[role=\"dialog\"], div[aria-modal=\"true\"]');"
+                            "if (!root) return 0;"
+                            "const buttons = Array.from(root.querySelectorAll('button,[role=\"button\"]'))"
+                            ".filter(el => /view all/i.test(el.textContent||''));"
+                            "const expanders = Array.from(root.querySelectorAll('[role=\"button\"][aria-expanded=\"false\"]'));"
+                            "const toClick = [...new Set([...buttons, ...expanders])];"
+                            "toClick.forEach(el => { try { el.click(); } catch (e) {} });"
+                            "return toClick.length;"
+                        )
+                    except Exception:
+                        pass
+                    wait_for_profile_dom(session.browser, timeout=12)
                     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                     safe_name = "".join([c if c.isalnum() or c in ['-', '_'] else '_' for c in (geomatch.get_name() or 'profile')])
                     path = os.path.join(debug_html_dir, f"{ts}_profile_loaded_{i+1}_{safe_name}.html")
