@@ -293,7 +293,7 @@ def save_session_artifacts(session, cookies_output=None, localstorage_output=Non
 def scrape_profile(email: str = None, password: str = None, login_method: str = 'facebook', 
                    cookie_file: str = None, output_format: str = 'json', output_file: str = None, 
                    headless: bool = True, limit: int = 1, delay: float = 1.5,
-                   swipe: str = None, no_swipe: bool = False,
+                   swipe: str = None, no_swipe: bool = False, allow_geolocation: bool = False,
                    location: str = None, distance_km: float = None, keep_browser_open: bool = False,
                    debug_html_dir: str = None, localstorage_file: str = None,
                    idb_file: str = None, manual_login: bool = False,
@@ -313,8 +313,11 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
     try:
         print(f"{CYAN} Initializing Tinder session...")
         
+        # Enable geolocation only when explicitly requested
+        allow_geolocation = bool(allow_geolocation or location or distance_km)
+
         # Create session (headless mode if requested)
-        session = Session(headless=headless, store_session=True)
+        session = Session(headless=headless, store_session=True, allow_geolocation=allow_geolocation)
         
         logged_in = False
 
@@ -609,6 +612,8 @@ def main():
                         help='Swipe action between profiles (default: like when limit > 1)')
     parser.add_argument('--no-swipe', action='store_true',
                         help='Extract profile data without swiping (single profile only)')
+    parser.add_argument('--allow-geolocation', action='store_true',
+                        help='Allow geolocation permission for Tinder (required for location overrides)')
     parser.add_argument('--location',
                         help='Set custom location as "lat,lng" (e.g., 47.6062,-122.3321)')
     parser.add_argument('--distance-km', type=float,
@@ -653,6 +658,7 @@ def main():
         delay=args.delay,
         swipe=args.swipe,
         no_swipe=args.no_swipe,
+        allow_geolocation=args.allow_geolocation,
         location=args.location,
         distance_km=args.distance_km,
         keep_browser_open=args.keep_browser_open,

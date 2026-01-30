@@ -40,7 +40,7 @@ from tinderbotz.addproxy import get_proxy_extension
 class Session:
     HOME_URL = "https://www.tinder.com/app/recs"
 
-    def __init__(self, headless=False, store_session=True, proxy=None, user_data=False):
+    def __init__(self, headless=False, store_session=True, proxy=None, user_data=False, allow_geolocation=False):
         self.email = None
         self.may_send_email = False
         self.session_data = {
@@ -86,7 +86,11 @@ class Session:
         # Setting some options of the browser here below
 
         options = uc.ChromeOptions()
-
+        # Allow geolocation only when explicitly requested
+        if allow_geolocation:
+            options.add_experimental_option("prefs", {
+                "profile.default_content_setting_values.geolocation": 1
+            })
         # Create empty profile to avoid annoying Mac Popup
         if store_session:
             if not user_data:
@@ -126,9 +130,21 @@ class Session:
         # Getting the chromedriver from cache or download it from internet
         print("Getting ChromeDriver ...")
         # Pass headless as a parameter to uc.Chrome() instead of setting it on options
-        self.browser = uc.Chrome(options=options, headless=headless)  # ChromeDriverManager().install(),
+        # Pin driver major version to match local Chrome (avoid mismatched driver errors)
+        self.browser = uc.Chrome(options=options, headless=headless, version_main=144)  # ChromeDriverManager().install(),
         # self.browser = webdriver.Chrome(options=options)
         # self.browser.set_window_size(1250, 750)
+
+        # Grant geolocation permissions via CDP (bypasses OS prompt)
+        if allow_geolocation:
+            try:
+                for origin in ["https://tinder.com", "https://www.tinder.com"]:
+                    self.browser.execute_cdp_cmd(
+                        "Browser.grantPermissions",
+                        {"origin": origin, "permissions": ["geolocation"]}
+                    )
+            except Exception:
+                pass
 
         # clear the console based on the operating system you're using
         #os.system('cls' if os.name == 'nt' else 'clear')
