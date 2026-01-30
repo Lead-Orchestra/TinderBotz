@@ -314,7 +314,7 @@ class Session:
 
             age = helper.get_age()
 
-            bio, passions, lifestyle, basics, anthem, looking_for, prompts = helper.get_bio_and_passions()
+            bio, passions, lifestyle, basics, anthem, looking_for, prompts, more_about, looking_for_tags = helper.get_bio_and_passions()
             image_urls = helper.get_image_urls(quickload)
             socials = helper.get_socials(bio)
             instagram = socials.get("instagram") or helper.get_insta(bio)
@@ -327,9 +327,18 @@ class Session:
             verified = rowdata.get('verified')
             recently_active = rowdata.get('recently_active')
             height_cm = rowdata.get('height_cm')
+            education_level = None
+            if more_about:
+                for item in more_about:
+                    if not item:
+                        continue
+                    lower = item.lower()
+                    if lower.startswith("education:"):
+                        education_level = item.split(":", 1)[1].strip() if ":" in item else item
+                        break
 
             return Geomatch(name=name, age=age, work=work, gender=gender, study=study, home=home, distance=distance,
-                            bio=bio, passions=passions, lifestyle=lifestyle, basics=basics, anthem=anthem, looking_for=looking_for, image_urls=image_urls, instagram=instagram, socials=socials, verified=verified, recently_active=recently_active, height_cm=height_cm, prompts=prompts)
+                            bio=bio, passions=passions, lifestyle=lifestyle, basics=basics, anthem=anthem, looking_for=looking_for, image_urls=image_urls, instagram=instagram, socials=socials, verified=verified, recently_active=recently_active, height_cm=height_cm, prompts=prompts, more_about=more_about, looking_for_tags=looking_for_tags, education_level=education_level)
 
     def get_chat_ids(self, new=True, messaged=True):
         if self._is_logged_in():

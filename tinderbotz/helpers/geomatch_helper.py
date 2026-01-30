@@ -623,7 +623,7 @@ class GeomatchHelper:
             essentials = self.browser.execute_script(
                 """
                 const root = arguments[0];
-                if (!root) return [];
+                if (!root) return { items: [], verified: false };
                 const h2s = Array.from(root.querySelectorAll('h2'));
                 const norm = (s) => (s || '').toLowerCase().replace(/\\s+/g, ' ').trim();
                 const textOf = (el) => (el && (el.textContent || '').trim()) || '';
@@ -635,26 +635,30 @@ class GeomatchHelper:
                         const v = textOf(li.querySelector('div[class*=\"Typs(body-1-regular)\"]')) || textOf(li);
                         return v;
                     }).filter(Boolean);
-                    return items;
+                    const verified = Array.from(section.querySelectorAll('title')).some(t => /photo verified/i.test(t.textContent || ''))
+                        || /photo verified/i.test(textOf(section));
+                    return { items, verified };
                 }
-                return [];
+                return { items: [], verified: false };
                 """,
                 scope
             )
-            if essentials and isinstance(essentials, list):
-                for item in essentials:
+            if essentials and isinstance(essentials, dict):
+                if essentials.get("verified"):
+                    rowdata["verified"] = True
+                items = essentials.get("items") or []
+                for item in items:
                     if not item:
                         continue
                     lower = item.lower()
-                    if "verified" in lower:
-                        rowdata["verified"] = True
-                        continue
                     height_match = re.search(r'(\\d{2,3})\\s*cm', lower)
                     if height_match and not rowdata.get('height_cm'):
                         try:
                             rowdata['height_cm'] = int(height_match.group(1))
                         except ValueError:
                             pass
+                    if not rowdata.get('study') and any(token in lower for token in ["student at", "university", "college", "school"]):
+                        rowdata['study'] = item.strip()
                         continue
                     if not rowdata.get('home') and lower.startswith("lives in "):
                         rowdata['home'] = item[len("lives in "):].strip()
@@ -736,6 +740,7 @@ class GeomatchHelper:
 
         scope, _ = self._get_profile_scope(open_if_needed=True)
         self._expand_profile_sections(scope)
+        self._expand_profile_sections(scope)
 
         xpath = './/div[contains(@class,"Row")]'
         rows = scope.find_elements(By.XPATH, xpath)
@@ -808,6 +813,8 @@ class GeomatchHelper:
         bio = None
         looking_for = None
         prompts = []
+        more_about = []
+        looking_for_tags = []
 
         infoItems = {
             "passions": [],
@@ -946,8 +953,12 @@ class GeomatchHelper:
                 if spark.get("lifestyle"):
                     infoItems["lifestyle"] = spark.get("lifestyle")
                 if spark.get("more_about"):
-                    infoItems["basics"] = spark.get("more_about")
+                    more_about = spark.get("more_about") or []
+                    for item in more_about:
+                        if item and item not in infoItems["basics"]:
+                            infoItems["basics"].append(item)
                 if spark.get("looking_for_tags"):
+                    looking_for_tags = spark.get("looking_for_tags") or []
                     for tag in spark.get("looking_for_tags") or []:
                         if tag and tag not in infoItems["basics"]:
                             infoItems["basics"].append(tag)
@@ -1051,7 +1062,7 @@ class GeomatchHelper:
         except Exception as e:
             pass
 
-        return bio, infoItems["passions"], infoItems["lifestyle"], infoItems["basics"], anthem, looking_for, prompts
+        return bio, infoItems["passions"], infoItems["lifestyle"], infoItems["basics"], anthem, looking_for, prompts, more_about, looking_for_tags
 
     def get_image_urls(self, quickload=True):
         image_urls = []

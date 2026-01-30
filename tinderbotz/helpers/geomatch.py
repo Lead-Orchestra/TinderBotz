@@ -2,7 +2,7 @@ from tinderbotz.helpers.storage_helper import StorageHelper
 
 class Geomatch:
 
-    def __init__(self, name, age, work, study, home, gender, bio, lifestyle, basics, anthem, looking_for = None, distance = None, passions = None, image_urls = None, instagram = None, socials = None, verified = None, recently_active = None, height_cm = None, prompts = None):
+    def __init__(self, name, age, work, study, home, gender, bio, lifestyle, basics, anthem, looking_for = None, distance = None, passions = None, image_urls = None, instagram = None, socials = None, verified = None, recently_active = None, height_cm = None, prompts = None, more_about = None, looking_for_tags = None, education_level = None):
         self.name = name
         self.age = age
         self.work = work
@@ -23,6 +23,9 @@ class Geomatch:
         self.recently_active = recently_active
         self.height_cm = height_cm
         self.prompts = prompts or []
+        self.more_about = more_about or []
+        self.looking_for_tags = looking_for_tags or []
+        self.education_level = education_level
 
         # create a unique id for this person
         self.id = "{}{}_{}".format(name, age, StorageHelper.id_generator(size=4))
@@ -107,6 +110,15 @@ class Geomatch:
     def get_prompts(self):
         return self.prompts
 
+    def get_more_about(self):
+        return self.more_about
+
+    def get_looking_for_tags(self):
+        return self.looking_for_tags
+
+    def get_education_level(self):
+        return self.education_level
+
     def get_id(self):
         return self.id
 
@@ -133,5 +145,8 @@ class Geomatch:
             "recently_active": self.get_recently_active(),
             "height_cm": self.get_height_cm(),
             "prompts": self.get_prompts(),
+            "more_about": self.get_more_about(),
+            "looking_for_tags": self.get_looking_for_tags(),
+            "education_level": self.get_education_level(),
         }
         return data
