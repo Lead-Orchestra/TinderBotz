@@ -303,6 +303,10 @@ class Session:
             self._handle_potential_popups()
 
             helper.wait_for_profile_ready()
+            try:
+                helper.wait_for_profile_content()
+            except Exception:
+                pass
             name = None
             attempts = 0
             max_attempts = 3

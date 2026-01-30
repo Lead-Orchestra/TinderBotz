@@ -249,6 +249,31 @@ class GeomatchHelper:
             time.sleep(0.5)
         return False
 
+    def wait_for_profile_content(self, timeout=12):
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                scope, _ = self._get_profile_scope(open_if_needed=True)
+                if scope:
+                    data = self.browser.execute_script(
+                        """
+                        const root = arguments[0];
+                        if (!root) return {count: 0, ready: false};
+                        const h2s = Array.from(root.querySelectorAll('h2'));
+                        const norm = (s)=> (s||'').toLowerCase().replace(/\\s+/g,' ').trim();
+                        const hasLooking = h2s.some(h=> norm(h.textContent).includes('looking for'));
+                        const hasEssentials = h2s.some(h=> norm(h.textContent)==='essentials');
+                        return {count: h2s.length, ready: (h2s.length>0) && (hasLooking || hasEssentials)};
+                        """,
+                        scope
+                    )
+                    if data and isinstance(data, dict) and data.get("ready"):
+                        return True
+            except Exception:
+                pass
+            time.sleep(0.5)
+        return False
+
     def _get_profile_scope(self, open_if_needed=False):
         active_name = None
         # Prefer the expanded profile content container when available
@@ -739,6 +764,7 @@ class GeomatchHelper:
             return rowdata
 
         scope, _ = self._get_profile_scope(open_if_needed=True)
+        self._expand_profile_sections(scope)
         self._expand_profile_sections(scope)
         self._expand_profile_sections(scope)
 
