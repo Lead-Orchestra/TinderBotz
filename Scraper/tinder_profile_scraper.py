@@ -445,7 +445,7 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
             print(f"{CYAN} Extracting first visible profile...")
             print(f"{YELLOW} Note: This will NOT swipe - only view the current profile")
         else:
-            swipe_label = swipe or 'like'
+            swipe_label = swipe or 'dislike'
             print(f"{CYAN} Extracting up to {total} profiles...")
             print(f"{YELLOW} Swipe mode: {swipe_label} (delay: {delay}s)")
 
@@ -546,7 +546,7 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
                     break
 
                 if swipe is None:
-                    swipe = 'like'
+                    swipe = 'dislike'
 
                 if swipe == 'like':
                     session.like(amount=1, sleep=delay, randomize_sleep=False)

@@ -542,6 +542,25 @@ class GeomatchHelper:
         except Exception:
             pass
 
+        # Sparks layout: read aria-label on h1 when present
+        try:
+            scope, _ = self._get_profile_scope(open_if_needed=True)
+            js_age = self.browser.execute_script(
+                """
+                const root = arguments[0] || document;
+                const h1 = root.querySelector('h1[aria-label]');
+                if (!h1) return null;
+                const label = h1.getAttribute('aria-label') || '';
+                const match = label.match(/\\b(1[8-9]|[2-5]\\d)\\b/);
+                return match ? parseInt(match[1], 10) : null;
+                """,
+                scope
+            )
+            if js_age:
+                return int(js_age)
+        except Exception:
+            pass
+
         return age
 
     def is_verified(self):
@@ -552,8 +571,21 @@ class GeomatchHelper:
         try:
             self.browser.find_element(By.XPATH, xpath_badge)
             return True
+        except Exception:
+            pass
 
-        except:
+        # Sparks layout: check for "Photo verified" text in profile scope
+        try:
+            scope, _ = self._get_profile_scope(open_if_needed=True)
+            verified = self.browser.execute_script(
+                """
+                const root = arguments[0] || document;
+                return (root.textContent || '').toLowerCase().includes('photo verified');
+                """,
+                scope
+            )
+            return bool(verified)
+        except Exception:
             return False
 
     _WORK_SVG_PATH = "M7.15 3.434h5.7V1.452a.728.728 0 0 0-.724-.732H7.874a.737.737 0 0 0-.725.732v1.982z"
@@ -912,51 +944,62 @@ class GeomatchHelper:
                     if (!title) continue;
                     const section = h2.closest('section') || h2.closest('div');
                     if (!section) continue;
+                    const container = section.closest('section') || section.parentElement || section;
 
                     if (title === 'about me') {
-                        const aboutEl = section.querySelector('div[class*="Typs(body-1-regular)"]') || section;
+                        const aboutEl = container.querySelector('div[class*="Typs(body-1-regular)"]') || container;
                         const txt = textOf(aboutEl);
                         if (txt) out.about = txt;
                     } else if (title === 'looking for') {
-                        const primary = section.querySelector('span[class*="Typs(display-3-strong)"], div[class*="Typs(display-3-strong)"]');
+                        const primary = container.querySelector('span[class*="Typs(display-3-strong)"], div[class*="Typs(display-3-strong)"]');
                         const primaryText = textOf(primary);
                         if (primaryText) out.looking_for = primaryText;
 
-                        const chips = Array.from(section.querySelectorAll('div[class*="Bdrs(30px)"]'))
+                        const chips = Array.from(container.querySelectorAll('div[class*="Bdrs(30px)"]'))
                             .map((el) => textOf(el))
                             .filter(Boolean);
                         for (const chip of chips) {
                             if (!out.looking_for_tags.includes(chip)) out.looking_for_tags.push(chip);
                         }
                     } else if (title === 'interests') {
-                        const chips = Array.from(section.querySelectorAll('li span, li div'))
+                        const chips = Array.from(container.querySelectorAll('span[class*="C($c-ds-text-passions-shared)"]'))
                             .map((el) => textOf(el))
                             .filter((t) => t && t.length < 80);
                         for (const chip of chips) {
                             if (!out.interests.includes(chip)) out.interests.push(chip);
                         }
                     } else if (title === 'lifestyle') {
-                        const items = Array.from(section.querySelectorAll('li'));
+                        const items = Array.from(container.querySelectorAll('li'));
                         for (const li of items) {
                             const label = textOf(li.querySelector('h3'));
                             const value = textOf(li.querySelector('div[class*="Typs(body-1-regular)"]'));
-                            if (label && value) out.lifestyle.push(`${label}: ${value}`);
+                            if (label && value) {
+                                out.lifestyle.push(`${label}: ${value}`);
+                            } else {
+                                const fallback = textOf(li);
+                                if (fallback) out.lifestyle.push(fallback);
+                            }
                         }
                     } else if (title === 'more about me') {
-                        const items = Array.from(section.querySelectorAll('li'));
+                        const items = Array.from(container.querySelectorAll('li'));
                         for (const li of items) {
                             const label = textOf(li.querySelector('h3'));
                             const value = textOf(li.querySelector('div[class*="Typs(body-1-regular)"]'));
-                            if (label && value) out.more_about.push(`${label}: ${value}`);
+                            if (label && value) {
+                                out.more_about.push(`${label}: ${value}`);
+                            } else {
+                                const fallback = textOf(li);
+                                if (fallback) out.more_about.push(fallback);
+                            }
                         }
                     } else if (title === 'essentials') {
-                        const items = Array.from(section.querySelectorAll('li'));
+                        const items = Array.from(container.querySelectorAll('li'));
                         for (const li of items) {
                             const value = textOf(li.querySelector('div[class*="Typs(body-1-regular)"]')) || textOf(li);
                             if (value) out.essentials.push(value);
                         }
                     } else {
-                        const answerEl = section.querySelector('div[class*="Typs(display-2-strong)"]');
+                        const answerEl = container.querySelector('div[class*="Typs(display-2-strong)"], span[class*="Typs(display-2-strong)"]');
                         const answer = textOf(answerEl);
                         if (answer) {
                             out.prompts.push({ question: textOf(h2), answer });

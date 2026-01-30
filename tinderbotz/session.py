@@ -31,6 +31,7 @@ from tinderbotz.helpers.geomatch_helper import GeomatchHelper
 from tinderbotz.helpers.match_helper import MatchHelper
 from tinderbotz.helpers.login_helper import LoginHelper
 from tinderbotz.helpers.storage_helper import StorageHelper
+import re
 from tinderbotz.helpers.email_helper import EmailHelper
 from tinderbotz.helpers.constants_helper import Printouts
 from tinderbotz.helpers.xpaths import *
@@ -331,6 +332,35 @@ class Session:
             verified = rowdata.get('verified')
             recently_active = rowdata.get('recently_active')
             height_cm = rowdata.get('height_cm')
+
+            # Fallbacks from basics (Sparks layout)
+            if basics:
+                try:
+                    if distance is None:
+                        for item in basics:
+                            if not item:
+                                continue
+                            lower = item.lower()
+                            if "mile" in lower or "kilometre" in lower or "kilometer" in lower or "km away" in lower:
+                                m = re.search(r'(\d+)', item)
+                                if m:
+                                    distance = int(m.group(1))
+                                    break
+                    if height_cm is None:
+                        for item in basics:
+                            if not item:
+                                continue
+                            m = re.search(r'(\d{2,3})\s*cm', item.lower())
+                            if m:
+                                height_cm = int(m.group(1))
+                                break
+                    if verified is None:
+                        for item in basics:
+                            if item and "photo verified" in item.lower():
+                                verified = True
+                                break
+                except Exception:
+                    pass
             education_level = None
             if more_about:
                 for item in more_about:
