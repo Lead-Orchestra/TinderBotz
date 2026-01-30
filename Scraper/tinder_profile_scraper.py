@@ -292,7 +292,7 @@ def save_session_artifacts(session, cookies_output=None, localstorage_output=Non
 
 def scrape_profile(email: str = None, password: str = None, login_method: str = 'facebook', 
                    cookie_file: str = None, output_format: str = 'json', output_file: str = None, 
-                   headless: bool = True, limit: int = 1, delay: float = 1.5,
+                   headless: bool = True, limit: int = 1, delay: float = 1.5, speed: str = 'fast',
                    swipe: str = None, no_swipe: bool = False, allow_geolocation: bool = False,
                    location: str = None, distance_km: float = None, keep_browser_open: bool = False,
                    debug_html_dir: str = None, localstorage_file: str = None,
@@ -315,6 +315,12 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
         
         # Enable geolocation only when explicitly requested
         allow_geolocation = bool(allow_geolocation or location or distance_km)
+        speed_mode = (speed or 'fast').strip().lower()
+        if speed_mode not in ['fast', 'safe']:
+            speed_mode = 'fast'
+        dom_timeout = 8 if speed_mode == 'fast' else 12
+        dom_poll = 0.25 if speed_mode == 'fast' else 0.5
+        print(f"{CYAN} Speed mode: {speed_mode} (dom timeout: {dom_timeout}s)")
 
         # Create session (headless mode if requested)
         session = Session(headless=headless, store_session=True, allow_geolocation=allow_geolocation)
@@ -449,7 +455,7 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
             print(f"{CYAN} Extracting up to {total} profiles...")
             print(f"{YELLOW} Swipe mode: {swipe_label} (delay: {delay}s)")
 
-        def wait_for_profile_dom(browser, timeout=12):
+        def wait_for_profile_dom(browser, timeout=dom_timeout, poll_interval=dom_poll):
             end = time.time() + timeout
             while time.time() < end:
                 try:
@@ -468,7 +474,7 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
                         return True
                 except Exception:
                     pass
-                time.sleep(0.5)
+                time.sleep(poll_interval)
             return False
 
         for i in range(total):
@@ -673,6 +679,8 @@ def main():
                         help='Maximum number of profiles to extract (default: 1)')
     parser.add_argument('--delay', type=float, default=1.5,
                         help='Delay between swipes in seconds (default: 1.5)')
+    parser.add_argument('--speed', choices=['fast', 'safe'], default='fast',
+                        help='Speed preset for DOM waits (default: fast)')
     parser.add_argument('--swipe', choices=['like', 'dislike', 'superlike'], default=None,
                         help='Swipe action between profiles (default: like when limit > 1)')
     parser.add_argument('--no-swipe', action='store_true',
@@ -721,6 +729,7 @@ def main():
         headless=headless_mode,
         limit=args.limit,
         delay=args.delay,
+        speed=args.speed,
         swipe=args.swipe,
         no_swipe=args.no_swipe,
         allow_geolocation=args.allow_geolocation,
