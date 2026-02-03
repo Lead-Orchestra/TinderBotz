@@ -95,7 +95,8 @@ class Session:
         # Create empty profile to avoid annoying Mac Popup
         if store_session:
             if not user_data:
-                user_data = f"{Path().absolute()}/chrome_profile/"
+                # Use a fresh profile per run to avoid "profile in use" startup failures
+                user_data = f"{Path().absolute()}/chrome_profile_{int(time.time())}/"
             if not os.path.isdir(user_data):
                 os.mkdir(user_data)
 
@@ -130,9 +131,44 @@ class Session:
         
         # Getting the chromedriver from cache or download it from internet
         print("Getting ChromeDriver ...")
-        # Pass headless as a parameter to uc.Chrome() instead of setting it on options
-        # Pin driver major version to match local Chrome (avoid mismatched driver errors)
-        self.browser = uc.Chrome(options=options, headless=headless, version_main=144)  # ChromeDriverManager().install(),
+        # Pass headless as a parameter to uc.Chrome() instead of setting it on options.
+        # Only pin the driver when explicitly requested to avoid mismatches after Chrome updates.
+        def _detect_chrome_version_main():
+            version_env = os.getenv("TINDER_CHROME_VERSION_MAIN")
+            if version_env:
+                try:
+                    return int(version_env)
+                except ValueError:
+                    return None
+
+            if platform.system().lower().startswith("win"):
+                try:
+                    import winreg
+                except Exception:
+                    return None
+
+                reg_paths = [
+                    (winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon"),
+                    (winreg.HKEY_LOCAL_MACHINE, r"Software\Google\Chrome\BLBeacon"),
+                    (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Google\Chrome\BLBeacon"),
+                ]
+                for root, path in reg_paths:
+                    try:
+                        with winreg.OpenKey(root, path) as key:
+                            value, _ = winreg.QueryValueEx(key, "version")
+                            if value:
+                                return int(str(value).split(".")[0])
+                    except Exception:
+                        continue
+
+            return None
+
+        version_main = _detect_chrome_version_main()
+
+        if version_main:
+            self.browser = uc.Chrome(options=options, headless=headless, version_main=version_main)  # ChromeDriverManager().install(),
+        else:
+            self.browser = uc.Chrome(options=options, headless=headless)  # ChromeDriverManager().install(),
         # self.browser = webdriver.Chrome(options=options)
         # self.browser.set_window_size(1250, 750)
 

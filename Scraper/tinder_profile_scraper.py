@@ -30,6 +30,44 @@ RED = "[X]"
 YELLOW = "[!]"
 CYAN = "[*]"
 
+try:
+    from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
+except Exception:
+    InvalidSessionIdException = Exception
+    WebDriverException = Exception
+
+
+def safe_is_logged_in(session):
+    """Check login status without crashing if the browser session died."""
+    try:
+        return session._is_logged_in()
+    except (InvalidSessionIdException, WebDriverException) as e:
+        print(f"{YELLOW} Browser session lost while checking login: {e}")
+        return False
+
+
+def is_session_alive(session):
+    """Return True if the webdriver session is alive."""
+    try:
+        _ = session.browser.current_url
+        return True
+    except (InvalidSessionIdException, WebDriverException):
+        return False
+
+
+def wait_for_login(session, timeout_seconds=15):
+    """Wait for the Tinder app URL to appear."""
+    waited = 0
+    while waited < timeout_seconds:
+        try:
+            if session._is_logged_in():
+                return True
+        except (InvalidSessionIdException, WebDriverException):
+            return False
+        time.sleep(1)
+        waited += 1
+    return False
+
 
 def load_cookies_from_file(cookie_file):
     """Load cookies from JSON file extracted by extract_tinder_cookies.py"""
@@ -161,8 +199,20 @@ def inject_cookies_to_session(session, cookies, debug_html_dir=None):
             print(f"{YELLOW}  4. Make sure you're fully logged in (URL should be tinder.com/app/...)")
             print(f"{YELLOW}  5. Then run: pnpm scrape:tinder --auto-session")
         
+        # If only load balancer cookies are present, don't treat this as authenticated
+        auth_cookie_names = set([
+            'TinderID', 'id_token', 'access_token', 'sessionid', 'session_id',
+            '__cf_bm', 'tinderweb', 'auth', 'session'
+        ])
+        cookie_names = set([c.get('name') for c in cookies if isinstance(c, dict)])
+        only_lb_cookies = cookie_names.issubset({'AWSALB', 'AWSALBCORS', 'g_state'})
+        has_auth_cookie = any(name in auth_cookie_names for name in cookie_names)
+        if only_lb_cookies and not has_auth_cookie:
+            print(f"{YELLOW} Only load balancer cookies detected - treating as unauthenticated")
+            return False
+
         # Verify login status
-        if session._is_logged_in():
+        if safe_is_logged_in(session):
             print(f"{GREEN} Successfully logged in via cookies!")
             return True
         else:
@@ -188,8 +238,23 @@ def inject_cookies_to_session(session, cookies, debug_html_dir=None):
 def inject_localstorage_to_session(session, localstorage_map, debug_html_dir=None):
     """Inject localStorage values for specified origins."""
     try:
+        if not is_session_alive(session):
+            return "session_lost"
         browser = session.browser
-        for origin, items in (localstorage_map or {}).items():
+        items_by_origin = dict(localstorage_map or {})
+        # Mirror Tinder localStorage across www/non-www origins
+        for origin, items in list(items_by_origin.items()):
+            if origin.startswith("https://tinder.com"):
+                alt_origin = "https://www.tinder.com"
+            elif origin.startswith("https://www.tinder.com"):
+                alt_origin = "https://tinder.com"
+            else:
+                alt_origin = None
+
+            if alt_origin and alt_origin not in items_by_origin:
+                items_by_origin[alt_origin] = items
+
+        for origin, items in items_by_origin.items():
             print(f"{CYAN} Injecting localStorage for {origin} ({len(items)} keys)...")
             browser.get(origin)
             time.sleep(2)
@@ -217,6 +282,9 @@ def inject_localstorage_to_session(session, localstorage_map, debug_html_dir=Non
         browser.get("https://www.tinder.com/app/recs")
         time.sleep(3)
         return True
+    except (InvalidSessionIdException, WebDriverException) as e:
+        print(f"{YELLOW} Failed to inject localStorage (session lost): {e}")
+        return "session_lost"
     except Exception as e:
         print(f"{YELLOW} Failed to inject localStorage: {e}")
         return False
@@ -225,20 +293,44 @@ def inject_localstorage_to_session(session, localstorage_map, debug_html_dir=Non
 def inject_tokens_to_localstorage(session, tokens, debug_html_dir=None):
     """Inject token-like entries into localStorage and refresh."""
     try:
+        if not is_session_alive(session):
+            return "session_lost"
         if not tokens:
             return False
 
         browser = session.browser
-        browser.get("https://tinder.com")
-        time.sleep(2)
-
+        mapped_tokens = dict(tokens)
+        token_key_map = {
+            "authToken": ["TinderWeb/APIToken", "TinderWeb/authToken", "TinderWeb/AuthToken", "authToken"],
+            "refreshToken": ["TinderWeb/refreshToken", "TinderWeb/RefreshToken", "refreshToken"],
+            "accessToken": ["TinderWeb/accessToken", "access_token"],
+            "idToken": ["TinderWeb/idToken", "id_token"],
+        }
         for key, value in tokens.items():
-            try:
-                browser.execute_script(
-                    "window.localStorage.setItem(arguments[0], arguments[1]);", key, value
-                )
-            except Exception:
-                continue
+            for target_key in token_key_map.get(key, []):
+                if target_key not in mapped_tokens:
+                    mapped_tokens[target_key] = value
+        for origin in ["https://tinder.com", "https://www.tinder.com"]:
+            browser.get(origin)
+            time.sleep(2)
+            for key, value in mapped_tokens.items():
+                try:
+                    browser.execute_script(
+                        "window.localStorage.setItem(arguments[0], arguments[1]);", key, value
+                    )
+                except Exception:
+                    continue
+
+        try:
+            browser.get("https://www.tinder.com")
+            time.sleep(1)
+            token_check = browser.execute_script(
+                "return window.localStorage.getItem('TinderWeb/APIToken') || window.localStorage.getItem('TinderWeb/authToken') || null;"
+            )
+            if token_check:
+                print(f"{CYAN} localStorage APIToken present after inject")
+        except Exception:
+            pass
 
         if debug_html_dir:
             try:
@@ -254,8 +346,239 @@ def inject_tokens_to_localstorage(session, tokens, debug_html_dir=None):
         browser.get("https://www.tinder.com/app/recs")
         time.sleep(3)
         return True
+    except (InvalidSessionIdException, WebDriverException) as e:
+        print(f"{YELLOW} Failed to inject tokens into localStorage (session lost): {e}")
+        return "session_lost"
     except Exception as e:
         print(f"{YELLOW} Failed to inject tokens into localStorage: {e}")
+        return False
+
+
+def inject_tokens_to_indexeddb(session, tokens, idb_meta=None, persist_mfa_json=None, debug_html_dir=None):
+    """Inject token-like entries into IndexedDB to rehydrate sessions."""
+    try:
+        if not is_session_alive(session):
+            return "session_lost"
+        if not tokens:
+            return False
+
+        browser = session.browser
+        idb_meta = idb_meta or []
+
+        db_names = []
+        store_names = []
+        for meta in idb_meta:
+            if not isinstance(meta, dict):
+                continue
+            db_info = meta.get("database") or {}
+            if isinstance(db_info, dict):
+                db_name = db_info.get("name")
+                if isinstance(db_name, str) and db_name:
+                    db_names.append(db_name)
+            stores = meta.get("object_stores") or []
+            for store in stores:
+                if isinstance(store, str) and store:
+                    store_names.append(store)
+
+        # Clean tokens to strings only
+        safe_tokens = {}
+        for key, value in tokens.items():
+            if key and isinstance(key, str):
+                if value is None:
+                    continue
+                safe_tokens[key] = str(value)
+
+        # Add redux-persist key used by Tinder ("/persist::mfa") when tokens are present
+        if persist_mfa_json:
+            safe_tokens.setdefault("/persist::mfa", persist_mfa_json)
+        elif safe_tokens.get("authToken") or safe_tokens.get("refreshToken"):
+            persist_payload = {
+                "authToken": safe_tokens.get("authToken"),
+                "refreshToken": safe_tokens.get("refreshToken"),
+                "__PERSIST__": {
+                    "version": 0,
+                    "timestamp": int(time.time() * 1000),
+                },
+            }
+            safe_tokens.setdefault("/persist::mfa", json.dumps(persist_payload))
+
+        script = """
+        const tokens = arguments[0] || {};
+        const dbNames = arguments[1] || [];
+        const storeNames = arguments[2] || [];
+        const callback = arguments[arguments.length - 1];
+
+        const defaultDbNames = ['keyval-store', 'tinder', 'tinderdb', 'tinder-web', 'tinderweb', 'localforage'];
+        const defaultStoreNames = ['keyval', 'keyval-store', 'store', 'tinder', 'tinder-web', 'tinderweb', 'localforage'];
+
+        function uniq(arr) {
+            const out = [];
+            const seen = new Set();
+            for (const item of arr) {
+                if (!item || seen.has(item)) continue;
+                seen.add(item);
+                out.push(item);
+            }
+            return out;
+        }
+
+        function openAndWrite(dbName, stores, payload, done) {
+            function openWithVersion(version) {
+                let req;
+                try {
+                    req = version ? indexedDB.open(dbName, version) : indexedDB.open(dbName);
+                } catch (e) {
+                    return done(false);
+                }
+
+                req.onupgradeneeded = function () {
+                    try {
+                        const db = req.result;
+                        stores.forEach((s) => {
+                            if (!db.objectStoreNames.contains(s)) {
+                                db.createObjectStore(s);
+                            }
+                        });
+                    } catch (e) {}
+                };
+
+                req.onerror = function () {
+                    done(false);
+                };
+
+                req.onsuccess = function () {
+                    const db = req.result;
+                    const availableStores = stores.filter((s) => db.objectStoreNames.contains(s));
+                    if (!availableStores.length) {
+                        if (!version) {
+                            const nextVersion = (db.version || 1) + 1;
+                            try { db.close(); } catch (e) {}
+                            return openWithVersion(nextVersion);
+                        }
+                        try { db.close(); } catch (e) {}
+                        return done(false);
+                    }
+
+                    let success = false;
+                    const tx = db.transaction(availableStores, 'readwrite');
+                    availableStores.forEach((storeName) => {
+                        const store = tx.objectStore(storeName);
+                        Object.keys(payload).forEach((k) => {
+                            try { store.put(payload[k], k); } catch (e) {}
+                        });
+                    });
+
+                    tx.oncomplete = function () {
+                        success = true;
+                        try { db.close(); } catch (e) {}
+                        done(success);
+                    };
+                    tx.onerror = function () {
+                        try { db.close(); } catch (e) {}
+                        done(false);
+                    };
+                };
+            }
+
+            openWithVersion();
+        }
+
+        (async () => {
+            const keys = Object.keys(tokens);
+            if (!keys.length) return callback(false);
+
+            let names = Array.isArray(dbNames) ? dbNames.slice() : [];
+            if (indexedDB.databases) {
+                try {
+                    const dbs = await indexedDB.databases();
+                    dbs.forEach((db) => db && db.name && names.push(db.name));
+                } catch (e) {}
+            }
+            names = uniq(names.concat(defaultDbNames));
+            const stores = uniq((Array.isArray(storeNames) ? storeNames : []).concat(defaultStoreNames));
+
+            let idx = 0;
+            function tryNext(success) {
+                if (success) return callback(true);
+                if (idx >= names.length) return callback(false);
+                const name = names[idx++];
+                openAndWrite(name, stores, tokens, tryNext);
+            }
+            tryNext(false);
+        })();
+        """
+
+        injected_any = False
+        for origin in ["https://tinder.com", "https://www.tinder.com"]:
+            browser.get(origin)
+            time.sleep(2)
+            try:
+                injected = browser.execute_async_script(script, safe_tokens, db_names, store_names)
+                if injected:
+                    injected_any = True
+            except Exception:
+                continue
+
+        if debug_html_dir and injected_any:
+            try:
+                os.makedirs(debug_html_dir, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = os.path.join(debug_html_dir, f"{ts}_tokens_indexeddb.html")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(browser.page_source or "")
+                print(f"{CYAN} Saved HTML: {path}")
+            except Exception as e:
+                print(f"{YELLOW} Failed to save HTML after IndexedDB inject: {e}")
+
+        if injected_any:
+            browser.get("https://www.tinder.com/app/recs")
+            time.sleep(3)
+            if "/persist::mfa" in safe_tokens:
+                verify_script = """
+                const dbName = arguments[0];
+                const storeName = arguments[1];
+                const keyName = arguments[2];
+                const done = arguments[arguments.length - 1];
+                try {
+                    const req = indexedDB.open(dbName);
+                    req.onerror = () => done(false);
+                    req.onsuccess = () => {
+                        const db = req.result;
+                        if (!db.objectStoreNames.contains(storeName)) {
+                            try { db.close(); } catch (e) {}
+                            return done(false);
+                        }
+                        const tx = db.transaction(storeName, 'readonly');
+                        const store = tx.objectStore(storeName);
+                        const getReq = store.get(keyName);
+                        getReq.onsuccess = () => {
+                            const val = getReq.result;
+                            try { db.close(); } catch (e) {}
+                            done(!!val);
+                        };
+                        getReq.onerror = () => {
+                            try { db.close(); } catch (e) {}
+                            done(false);
+                        };
+                    };
+                } catch (e) {
+                    done(false);
+                }
+                """
+                try:
+                    has_mfa = browser.execute_async_script(
+                        verify_script, "keyval-store", "keyval", "/persist::mfa"
+                    )
+                    if has_mfa:
+                        print(f"{CYAN} IndexedDB /persist::mfa present after inject")
+                except Exception:
+                    pass
+        return injected_any
+    except (InvalidSessionIdException, WebDriverException) as e:
+        print(f"{YELLOW} Failed to inject tokens into IndexedDB (session lost): {e}")
+        return "session_lost"
+    except Exception as e:
+        print(f"{YELLOW} Failed to inject tokens into IndexedDB: {e}")
         return False
 
 
@@ -324,8 +647,23 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
 
         # Create session (headless mode if requested)
         session = Session(headless=headless, store_session=True, allow_geolocation=allow_geolocation)
+        restart_attempts = 0
+
+        def restart_session():
+            nonlocal session, restart_attempts
+            restart_attempts += 1
+            if restart_attempts > 1:
+                return False
+            print(f"{YELLOW} Browser session lost. Restarting session...")
+            try:
+                session.browser.quit()
+            except Exception:
+                pass
+            session = Session(headless=headless, store_session=True, allow_geolocation=allow_geolocation)
+            return True
         
         logged_in = False
+        cookies = None
 
         # Manual login flow (one-time handoff)
         if manual_login:
@@ -369,7 +707,13 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
                     injected = inject_localstorage_to_session(
                         session, localstorage_map, debug_html_dir=debug_html_dir
                     )
-                    if injected and session._is_logged_in():
+                    if injected == "session_lost" and restart_session():
+                        if cookies:
+                            logged_in = inject_cookies_to_session(session, cookies, debug_html_dir=debug_html_dir)
+                        injected = inject_localstorage_to_session(
+                            session, localstorage_map, debug_html_dir=debug_html_dir
+                        )
+                    if injected and wait_for_login(session, timeout_seconds=15):
                         logged_in = True
                         print(f"{GREEN} Authentication successful via localStorage!")
             except Exception as e:
@@ -381,12 +725,26 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
                 with open(idb_file, 'r', encoding='utf-8') as f:
                     idb_map = json.load(f)
                 tokens = idb_map.get('tokens') if isinstance(idb_map, dict) else None
+                idb_meta = idb_map.get('meta') if isinstance(idb_map, dict) else None
+                persist_mfa = idb_map.get('persist_mfa') if isinstance(idb_map, dict) else None
                 if isinstance(tokens, dict) and tokens:
                     print(f"{CYAN} Injecting {len(tokens)} token(s) from IndexedDB dump...")
-                    injected = inject_tokens_to_localstorage(
+                    injected_idb = inject_tokens_to_indexeddb(
+                        session, tokens, idb_meta=idb_meta, persist_mfa_json=persist_mfa, debug_html_dir=debug_html_dir
+                    )
+                    injected_ls = inject_tokens_to_localstorage(
                         session, tokens, debug_html_dir=debug_html_dir
                     )
-                    if injected and session._is_logged_in():
+                    if (injected_idb == "session_lost" or injected_ls == "session_lost") and restart_session():
+                        if cookies:
+                            logged_in = inject_cookies_to_session(session, cookies, debug_html_dir=debug_html_dir)
+                        injected_idb = inject_tokens_to_indexeddb(
+                            session, tokens, idb_meta=idb_meta, persist_mfa_json=persist_mfa, debug_html_dir=debug_html_dir
+                        )
+                        injected_ls = inject_tokens_to_localstorage(
+                            session, tokens, debug_html_dir=debug_html_dir
+                        )
+                    if (injected_idb or injected_ls) and wait_for_login(session, timeout_seconds=20):
                         logged_in = True
                         print(f"{GREEN} Authentication successful via IndexedDB tokens!")
             except Exception as e:
@@ -407,7 +765,7 @@ def scrape_profile(email: str = None, password: str = None, login_method: str = 
             else:
                 # Check if already logged in (existing session)
                 print(f"{CYAN} Checking existing session...")
-                if session._is_logged_in():
+                if safe_is_logged_in(session):
                     print(f"{GREEN} Using existing session")
                     logged_in = True
                 else:
